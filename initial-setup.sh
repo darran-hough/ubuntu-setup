@@ -176,6 +176,11 @@ sudo apt-get install -f
 # ---------------------------
 sudo snap install whatsapp-for-linux
 
+# ---------------------------
+# Bitwig
+# ---------------------------
+sudo apt install flatpak
+flatpak install com.bitwig.BitwigStudio
 
 # ---------------------------
 # Cleanup
