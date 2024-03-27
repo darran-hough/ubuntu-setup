@@ -31,6 +31,7 @@ notify "Install the Liquorix kernel"
 sudo add-apt-repository ppa:damentz/liquorix -y && sudo apt-get update
 sudo apt-get install linux-image-liquorix-amd64 linux-headers-liquorix-amd64 -y
 sudo apt install linux-image-lowlatency-hwe-22.04
+sudo apt remove linux-image-generic-hwe-22.04 
 
 # ---------------------------
 # Install PipeWire
