@@ -30,6 +30,7 @@ sudo apt update && sudo apt dist-upgrade -y
 notify "Install the Liquorix kernel"
 sudo add-apt-repository ppa:damentz/liquorix -y && sudo apt-get update
 sudo apt-get install linux-image-liquorix-amd64 linux-headers-liquorix-amd64 -y
+sudo apt install linux-image-lowlatency-hwe-22.04
 
 # ---------------------------
 # Install PipeWire
@@ -64,6 +65,7 @@ sudo apt-get install apt-transport-https gpgv wget
 wget https://launchpad.net/~kxstudio-debian/+archive/kxstudio/+files/kxstudio-repos_11.1.0_all.deb
 # Install it
 sudo dpkg -i kxstudio-repos_11.1.0_all.deb
+sudo apt install cadence
 
 # ---------------------------
 # Modify GRUB options
