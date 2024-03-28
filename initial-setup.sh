@@ -19,9 +19,15 @@ notify () {
 
 
 # ---------------------------
-# Update our system
+# Update your system
 # ---------------------------
 sudo apt update && sudo apt dist-upgrade -y
+
+# ---------------------------
+# Update Snap Store
+# ---------------------------
+snap-store --quit && sudo snap refresh snap-store
+
 
 # ---------------------------
 # Change to low latency Kernel
@@ -195,9 +201,9 @@ flatpak install com.bitwig.BitwigStudio
 
 
 # ---------------------------
-# Chrome
+# install Chrome & remove Firefox
 # ---------------------------
-
+sudo apt-get remove firefox
 wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 sudo apt install ./google-chrome-stable_current_amd64.deb
 
