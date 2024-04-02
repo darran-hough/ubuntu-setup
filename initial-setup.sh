@@ -41,6 +41,18 @@ snap-store --quit && sudo snap refresh snap-store
 sudo apt install linux-image-lowlatency-hwe-22.04
 sudo apt remove linux-image-generic-hwe-22.04 
 
+
+# ================================ KXStudio
+# Update software sources
+sudo apt-get update
+# Install required dependencies if needed
+sudo apt-get install apt-transport-https gpgv wget
+# Download package file
+wget https://launchpad.net/~kxstudio-debian/+archive/kxstudio/+files/kxstudio-repos_11.1.0_all.deb
+# Install it
+sudo dpkg -i kxstudio-repos_11.1.0_all.deb
+sudo apt install cadence
+
 # ---------------------------
 # Install PipeWire
 # ---------------------------
@@ -64,16 +76,6 @@ systemctl --user --now enable wireplumber.service
 pactl info
 
 
-# ================================ KXStudio
-# Update software sources
-sudo apt-get update
-# Install required dependencies if needed
-sudo apt-get install apt-transport-https gpgv wget
-# Download package file
-wget https://launchpad.net/~kxstudio-debian/+archive/kxstudio/+files/kxstudio-repos_11.1.0_all.deb
-# Install it
-sudo dpkg -i kxstudio-repos_11.1.0_all.deb
-sudo apt install cadence
 
 # ---------------------------
 # Modify GRUB options
