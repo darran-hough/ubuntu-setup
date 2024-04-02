@@ -16,12 +16,10 @@ notify () {
 }
 
 
-
-
 # ---------------------------
 # Update your system
 # ---------------------------
-sudo apt update && sudo apt dist-upgrade -y
+sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
 
 
 # ---------------------------
@@ -40,14 +38,12 @@ snap-store --quit && sudo snap refresh snap-store
 # ---------------------------
 # Change to low latency Kernel
 # ---------------------------
-
 sudo apt install linux-image-lowlatency-hwe-22.04
 sudo apt remove linux-image-generic-hwe-22.04 
 
 # ---------------------------
 # Install PipeWire
 # ---------------------------
-
 # 1. **Check if PipeWire is installed**: PipeWire is pre-installed out-of-the-box in Ubuntu 22.04 and runs as a background service automatically. You can check its status by running the following command in the terminal:
 systemctl --user status pipewire pipewire-session-manager
 # 2. **Install client libraries**: Although PipeWire is available out-of-the-box, it's not in use by default for audio output. To get started, open the terminal (Ctrl+Alt+T) and run the following command to install the client libraries:
@@ -129,12 +125,22 @@ sudo apt install --install-recommends winehq-staging
 # Install Winetricks
 # See https://wiki.winehq.org/Ubuntu and https://wiki.winehq.org/Winetricks for additional information.
 # ---------------------------
-sudo apt-get update
-sudo apt-get install winetricks
-wget https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks
-chmod +x winetricks
-sudo mv -v winetricks /usr/local/bin
-winetricks
+sudo apt install cabextract -y
+mkdir -p ~/.local/share
+wget -O winetricks https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks
+mv winetricks ~/.local/share
+chmod +x ~/.local/share/winetricks
+echo '' >> ~/.bash_aliases
+echo '# Audio: winetricks' >> ~/.bash_aliases
+echo 'export PATH="$PATH:$HOME/.local/share"' >> ~/.bash_aliases
+. ~/.bash_aliases
+
+# Base wine packages required for proper plugin functionality
+winetricks corefonts
+
+# Make a copy of .wine, as we will use this in the future as the base of
+# new wine prefixes (when installing plugins)
+cp -r ~/.wine ~/.wine-base
 
 
 # ---------------------------
@@ -162,7 +168,21 @@ yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
 yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
 
 
+# ---------------------------
+# Media codecs
+# ---------------------------
+sudo apt install ubuntu-restricted-extras && sudo apt install vlc
 
+# ---------------------------
+# minimize dock items onclick
+# ---------------------------
+gsettings set org.gnome.shell.extensions.dash-to-dock click-action 'minimize'
+
+# ---------------------------
+# Backups and snapshots
+# ---------------------------
+sudo apt update
+sudo apt install -y deja-dup
 
 # ---------------------------
 # Steam
@@ -190,10 +210,6 @@ sudo apt-get install -f
 # ---------------------------
 sudo snap install whatsapp-for-linux
 
-# ---------------------------
-# Cleanup
-# ---------------------------
-sudo apt autoremove
 
 # ---------------------------
 # Bitwig
@@ -211,6 +227,23 @@ flatpak install com.bitwig.BitwigStudio
 sudo apt-get remove firefox
 wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 sudo apt install ./google-chrome-stable_current_amd64.deb
+
+# ---------------------------
+# install piper
+# ---------------------------
+sudo apt update
+sudo apt install piper
+
+# ---------------------------
+# Install Gimp
+# ---------------------------
+sudo apt update
+sudo apt install -y gimp
+
+# ---------------------------
+# Cleanup
+# ---------------------------
+sudo apt autoremove
 
 reboot
 
