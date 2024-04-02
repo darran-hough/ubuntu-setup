@@ -23,6 +23,14 @@ notify () {
 # ---------------------------
 sudo apt update && sudo apt dist-upgrade -y
 
+
+# ---------------------------
+# GPU AMD Drivers
+# ---------------------------
+wget https://repo.radeon.com/amdgpu-install/23.40.2/ubuntu/focal/amdgpu-install_6.0.60002-1_all.deb
+sudo dpkg -i amdgpu-install_6.0.60002-1_all.deb
+
+
 # ---------------------------
 # Update Snap Store
 # ---------------------------
@@ -33,9 +41,6 @@ snap-store --quit && sudo snap refresh snap-store
 # Change to low latency Kernel
 # ---------------------------
 
-notify "Install the Liquorix kernel"
-sudo add-apt-repository ppa:damentz/liquorix -y && sudo apt-get update
-sudo apt-get install linux-image-liquorix-amd64 linux-headers-liquorix-amd64 -y
 sudo apt install linux-image-lowlatency-hwe-22.04
 sudo apt remove linux-image-generic-hwe-22.04 
 
