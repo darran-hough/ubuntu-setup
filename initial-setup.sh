@@ -3,7 +3,7 @@
 # This is a bash script for configuring Ubuntu 22.04 for audio and gaming
 # ---------------------------
 # NOTE: Execute this script by running the following command on your system:
-# wget -O ~/initial-setup.sh https://raw.githubusercontent.com/darran-hough/ubuntu-setup/main/initial-setup.sh && chmod +x ~/initial-setup.sh && ~/initial-setup.sh
+# 
 
 
 # Exit if any command fails
@@ -117,11 +117,11 @@ sudo adduser $USER audio
 # See https://wiki.winehq.org/Ubuntu and https://wiki.winehq.org/Winetricks for additional information.
 # ---------------------------
 sudo dpkg --add-architecture i386
-wget -nc https://dl.winehq.org/wine-builds/winehq.key
-sudo apt-key add winehq.key
-sudo add-apt-repository 'deb https://dl.winehq.org/wine-builds/ubuntu/ focal main'
+sudo mkdir -pm755 /etc/apt/keyrings
+sudo wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+sudo wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources
 sudo apt update
-sudo apt install --install-recommends winehq-staging
+sudo apt install --install-recommends winehq-staging -y
 
 # ---------------------------
 # Install Winetricks
@@ -143,7 +143,6 @@ winetricks corefonts
 # Make a copy of .wine, as we will use this in the future as the base of
 # new wine prefixes (when installing plugins)
 cp -r ~/.wine ~/.wine-base
-
 
 # ---------------------------
 # Yabridge
