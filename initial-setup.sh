@@ -3,7 +3,7 @@
 # This is a bash script for configuring Ubuntu 22.04 for audio and gaming
 # ---------------------------
 # NOTE: Execute this script by running the following command on your system:
-# 
+# wget -O ~/initial-setup.sh https://raw.githubusercontent.com/darran-hough/ubuntu-setup/main/initial-setup.sh && chmod +x ~/initial-setup.sh && ~/initial-setup.sh
 
 
 # Exit if any command fails
