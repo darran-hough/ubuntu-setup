@@ -76,7 +76,7 @@ sudo apt remove pulseaudio-module-bluetooth
 # And, finally enable the media session by running command:
 systemctl --user --now enable wireplumber.service
 # After restarting Ubuntu, you can verify the installation by running the command below in terminal. It should output Sound server: PulseAudio (on PipeWire x.x.x) indicates Pipewire is in use as sound output.
-#pactl info
+# pactl info
 
 
 
