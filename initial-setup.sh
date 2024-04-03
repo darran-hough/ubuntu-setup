@@ -54,6 +54,7 @@ sudo dpkg -i kxstudio-repos_11.1.0_all.deb
 sudo apt update
 sudo apt install cadence
 
+sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
 
 
 # ---------------------------
