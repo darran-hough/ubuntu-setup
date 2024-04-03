@@ -150,7 +150,7 @@ cp -r ~/.wine ~/.wine-base
 # ---------------------------
 # Yabridge
 # ---------------------------
-wget -O yabridge.tar.gz https://github.com/robbert-vdh/yabridge/releases/download/5.1.0/yabridge-5.1.0.tar.gz
+wget -O yabridge.tar.gz https://github.com/robbert-vdh/yabridge/releases/download/5.0.5/yabridge-5.0.5.tar.gz
 mkdir -p ~/.local/share
 tar -C ~/.local/share -xavf yabridge.tar.gz
 rm yabridge.tar.gz
