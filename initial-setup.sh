@@ -53,6 +53,8 @@ wget https://launchpad.net/~kxstudio-debian/+archive/kxstudio/+files/kxstudio-re
 sudo dpkg -i kxstudio-repos_11.1.0_all.deb
 sudo apt install cadence
 
+sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
+
 # ---------------------------
 # Install PipeWire
 # ---------------------------
@@ -215,11 +217,7 @@ sudo snap install whatsapp-for-linux
 # ---------------------------
 # Bitwig
 # ---------------------------
-sudo apt install flatpak
-sudo apt install gnome-software-plugin-flatpak
-flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-sudo apt update && sudo apt dist-upgrade -y
-flatpak install com.bitwig.BitwigStudio
+##this will need to be installed manually using the .deb 
 
 
 # ---------------------------
