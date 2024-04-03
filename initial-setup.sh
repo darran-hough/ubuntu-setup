@@ -220,7 +220,11 @@ sudo snap install whatsapp-for-linux
 # ---------------------------
 # Bitwig
 # ---------------------------
-##this will need to be installed manually using the .deb 
+# sudo apt install flatpak
+# sudo apt install gnome-software-plugin-flatpak
+# flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+# sudo apt update
+# flatpak install flathub com.bitwig.BitwigStudio
 
 
 # ---------------------------
