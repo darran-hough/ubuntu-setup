@@ -39,7 +39,8 @@ sudo dpkg -i amdgpu-install_6.0.60002-1_all.deb
 # ---------------------------
 # Update Snap Store
 # ---------------------------
-snap-store --quit && sudo snap refresh snap-store
+
+killall snap-store && sudo snap refresh snap-store
 
 
 # ---------------------------
