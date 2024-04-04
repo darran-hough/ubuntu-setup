@@ -2,6 +2,13 @@
 # ---------------------------
 # This is a bash script for configuring Ubuntu 22.04 for audio and gaming
 # ---------------------------
+
+# Pre-requsites for focusrite
+you will need to ensure that the focusrite audio are enabled by using the following
+## 8i6 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
+## 4i4 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8212 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
+## echo " options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
+
 # NOTE: Execute this script by running the following command on your system:
 # wget -O ~/initial-setup.sh https://raw.githubusercontent.com/darran-hough/ubuntu-setup/main/initial-setup.sh && chmod +x ~/initial-setup.sh && ~/initial-setup.sh
 
