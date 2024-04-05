@@ -7,7 +7,7 @@
 you will need to ensure that the focusrite audio are enabled by using the following
 ## 8i6 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
 ## 4i4 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8212 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
-## echo " options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
+
 
 # NOTE: Execute this script by running the following command on your system:
 # wget -O ~/initial-setup.sh https://raw.githubusercontent.com/darran-hough/ubuntu-setup/main/initial-setup.sh && chmod +x ~/initial-setup.sh && ~/initial-setup.sh
@@ -40,29 +40,8 @@ sudo dpkg -i amdgpu-install_6.0.60002-1_all.deb
 # Update Snap Store
 # ---------------------------
 
-killall snap-store && sudo snap refresh snap-store
-
-
-# ---------------------------
-# Change to low latency Kernel
-# ---------------------------
-sudo apt install linux-image-lowlatency-hwe-22.04
-sudo apt remove linux-image-generic-hwe-22.04 
-
-
-# ================================ KXStudio
-# Update software sources
-sudo apt-get update
-# Install required dependencies if needed
-sudo apt-get install apt-transport-https gpgv wget
-# Download package file
-wget https://launchpad.net/~kxstudio-debian/+archive/kxstudio/+files/kxstudio-repos_11.1.0_all.deb
-# Install it
-sudo dpkg -i kxstudio-repos_11.1.0_all.deb
-sudo apt update
-sudo apt install cadence
-
-sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
+killall snap-store 
+sudo snap refresh snap-store
 
 
 # ---------------------------
@@ -102,7 +81,6 @@ sudo update-grub
 # ---------------------------
 # sysctl.conf
 # ---------------------------
-notify "sysctl.conf"
 # See https://wiki.linuxaudio.org/wiki/system_configuration for more information.
 echo 'vm.swappiness=10
 fs.inotify.max_user_watches=600000' | sudo tee -a /etc/sysctl.conf
@@ -185,7 +163,13 @@ yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
 # ---------------------------
 # Media codecs
 # ---------------------------
-sudo apt install ubuntu-restricted-extras && sudo apt install vlc
+sudo apt install ubuntu-restricted-extras
+
+
+# ---------------------------
+# VLC Media Player
+# ---------------------------
+sudo apt install vlc
 
 # ---------------------------
 # minimize dock items onclick
@@ -204,13 +188,20 @@ sudo apt install -y deja-dup
 sudo add-apt-repository multiverse
 sudo apt update
 sudo apt install steam
+# ---------------------------
+# Flatpak
+# ---------------------------
+sudo apt install flatpak
 
+sudo add-apt-repository ppa:flatpak/stable
+sudo apt update
+sudo apt install flatpak
+
+sudo apt install gnome-software-plugin-flatpak
 # ---------------------------
 # Heroic
 # ---------------------------
-sudo apt update
-sudo apt install snapd
-sudo snap install heroic
+flatpak install flathub io.github.heroic-games-launcher.Heroic
 
 # ---------------------------
 # Discord
@@ -222,18 +213,13 @@ sudo apt-get install -f
 # ---------------------------
 # Whatsapp
 # ---------------------------
-#sudo snap install whatsapp-for-linux
+sudo snap install whatsapp-for-linux
 
 
 # ---------------------------
 # Bitwig
 # ---------------------------
-# sudo apt install flatpak
-# sudo apt install gnome-software-plugin-flatpak
-# flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-# sudo apt update
-# flatpak install flathub com.bitwig.BitwigStudio
-
+# Download .deb file and install with sudo apt
 
 # ---------------------------
 # install Chrome & remove Firefox
