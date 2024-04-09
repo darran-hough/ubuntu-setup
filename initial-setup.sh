@@ -5,8 +5,27 @@
 
 # Pre-requsites for focusrite
 you will need to ensure that the focusrite audio are enabled by using the following
-## 8i6 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
-## 4i4 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8212 device_setup=1" > /etc/modprobe.d/snd_usb_audio.conf
+## 8i6 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" > /etc/modprobe.d/scarlett.conf
+## 4i4 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8212 device_setup=1" > /etc/modprobe.d/scarlett.conf
+
+# ---------------------------
+# alsa-scarlett-gui
+# ---------------------------
+# git clone [1](https://github.com/geoffreybennett/alsa-scarlett-gui)
+# cd alsa-scarlett-gui/src
+# make -j4
+# ./alsa-scarlett-gui
+
+# In the src folder you will find vu.b4.alsa-scarlett-gui.desktop copy this into /home/dhsplice/.local/share/applications
+
+# will also need to include the scarlett2 firmware: 
+# https://github.com/geoffreybennett/alsa-scarlett-gui?tab=readme-ov-file
+# sudo mkdir /usr/lib/firmware/scarlett2
+# cd /usr/lib/firmware/scarlett2
+# sudo apt -y install make gcc pkg-config libasound2-dev libssl-dev
+# make
+# sudo make install
+
 
 
 # NOTE: Execute this script by running the following command on your system:
@@ -23,11 +42,17 @@ notify () {
 }
 
 
+
+# ---------------------------
+# Update Snap Store
+# ---------------------------
+
+killall snap-store && sudo snap refresh snap-store
+
 # ---------------------------
 # Update your system
 # ---------------------------
 sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
-
 
 # ---------------------------
 # GPU AMD Drivers
@@ -35,38 +60,10 @@ sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
 wget https://repo.radeon.com/amdgpu-install/23.40.2/ubuntu/focal/amdgpu-install_6.0.60002-1_all.deb
 sudo dpkg -i amdgpu-install_6.0.60002-1_all.deb
 
-
 # ---------------------------
-# Update Snap Store
+# Liquorix Kernel
 # ---------------------------
-
-# killall snap-store 
-# sudo snap refresh snap-store
-
-
-# ---------------------------
-# Install PipeWire
-# ---------------------------
-# 1. **Check if PipeWire is installed**: PipeWire is pre-installed out-of-the-box in Ubuntu 22.04 and runs as a background service automatically. You can check its status by running the following command in the terminal:
-# systemctl --user status pipewire pipewire-session-manager
-# 2. **Install client libraries**: Although PipeWire is available out-of-the-box, it's not in use by default for audio output. To get started, open the terminal (Ctrl+Alt+T) and run the following command to install the client libraries:
-sudo apt install pipewire-audio-client-libraries libspa-0.2-bluetooth libspa-0.2-jack
-# 3. **Install wireplumber to replace pipewire-media-session**: The project maintainer now recommends the more advanced "wireplumber" session manager when using PipeWire as the system sound server. To install the package and remove "pipewire-media-session", run the following command in the terminal:
-sudo apt install wireplumber pipewire-media-session-
-# Note: There's a '-' at the end of the command which indicates to remove the package. The command will also install the required pipewire-pulse automatically.
-# 4. **Copy configuration files**: For ALSA clients to be configured to output via PipeWire, run the following command to copy the configuration file:
-sudo cp /usr/share/doc/pipewire/examples/alsa.conf.d/99-pipewire-default.conf /etc/alsa/conf.d/
-# For JACK client, run the following commands:
-sudo cp /usr/share/doc/pipewire/examples/ld.so.conf.d/pipewire-jack-*.conf /etc/ld.so.conf.d/
-sudo ldconfig
-# For Bluetooth, just remove the pulseaudio-module-bluetooth package via command:
-sudo apt remove pulseaudio-module-bluetooth
-# And, finally enable the media session by running command:
-systemctl --user --now enable wireplumber.service
-# After restarting Ubuntu, you can verify the installation by running the command below in terminal. It should output Sound server: PulseAudio (on PipeWire x.x.x) indicates Pipewire is in use as sound output.
-# pactl info
-
-
+curl -s 'https://liquorix.net/install-liquorix.sh' | sudo bash
 
 # ---------------------------
 # Modify GRUB options
@@ -74,7 +71,7 @@ systemctl --user --now enable wireplumber.service
 # mitigations=off:
 # cpufreq.default_governor=performance:
 # ---------------------------
-sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash threadirqs mitigations=off cpufreq.default_governor=performance"/g' /etc/default/grub
+sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/GRUB_CMDLINE_LINUX_DEFAULT="quiet threadirqs mitigations=off cpufreq.default_governor=performance"/g' /etc/default/grub
 sudo update-grub
 
 
@@ -97,10 +94,6 @@ echo '@audio - rtprio 90
 # ---------------------------
 sudo adduser $USER audio
 
-
-
-
-
 # ---------------------------
 # Wine (staging)
 # This is required for yabridge
@@ -111,8 +104,6 @@ sudo mkdir -pm755 /etc/apt/keyrings
 sudo wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
 sudo wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources
 sudo apt update && sudo apt install --install-recommends winehq-stable
-
-
 
 # ---------------------------
 # Install Winetricks
@@ -192,29 +183,23 @@ sudo apt install steam
 # Flatpak
 # ---------------------------
 sudo apt install flatpak
-
-sudo add-apt-repository ppa:flatpak/stable
-sudo apt update
-sudo apt install flatpak
-
 sudo apt install gnome-software-plugin-flatpak
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
+sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
 # ---------------------------
 # Heroic
 # ---------------------------
-flatpak install flathub io.github.heroic-games-launcher.Heroic
-
+# Install via software centre 
 # ---------------------------
 # Discord
 # ---------------------------
-wget "https://discord.com/api/download?platform=linux&format=deb" -O discord.deb
-sudo dpkg -i discord.deb
-sudo apt-get install -f
+# Install Manually 
 
 # ---------------------------
 # Whatsapp
 # ---------------------------
-sudo snap install whatsapp-for-linux
-
+# install whatsie
 
 # ---------------------------
 # Bitwig
