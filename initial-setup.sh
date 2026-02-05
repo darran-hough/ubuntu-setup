@@ -1,233 +1,149 @@
-#!/bin/bash
-# ---------------------------
-# This is a bash script for configuring Ubuntu 22.04 for audio and gaming
-# ---------------------------
+#!/usr/bin/env bash
+# ------------------------------------------------------------
+# Ubuntu 24.04 – Audio & Gaming Setup (Kernel‑agnostic version)
+# ------------------------------------------------------------
 
-# Pre-requsites for focusrite
-you will need to ensure that the focusrite audio are enabled by using the following
-## 8i6 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8213 device_setup=1" > /etc/modprobe.d/scarlett.conf
-## 4i4 - sudo su echo " options snd_usb_audio vid=0x1235 pid=0x8212 device_setup=1" > /etc/modprobe.d/scarlett.conf
-
-# ---------------------------
-# alsa-scarlett-gui
-# ---------------------------
-# git clone [1](https://github.com/geoffreybennett/alsa-scarlett-gui)
-# cd alsa-scarlett-gui/src
-# make -j4
-# ./alsa-scarlett-gui
-
-# In the src folder you will find vu.b4.alsa-scarlett-gui.desktop copy this into /home/dhsplice/.local/share/applications
-
-# will also need to include the scarlett2 firmware: 
-# https://github.com/geoffreybennett/alsa-scarlett-gui?tab=readme-ov-file
-# sudo mkdir /usr/lib/firmware/scarlett2
-# cd /usr/lib/firmware/scarlett2
-# sudo apt -y install make gcc pkg-config libasound2-dev libssl-dev
-# make
-# sudo make install
-
-
-
-# NOTE: Execute this script by running the following command on your system:
-# wget -O ~/initial-setup.sh https://raw.githubusercontent.com/darran-hough/ubuntu-setup/main/initial-setup.sh && chmod +x ~/initial-setup.sh && ~/initial-setup.sh
-
-
-# Exit if any command fails
-set -e
+set -e   # exit on any error
 
 notify () {
-  echo "--------------------------------------------------------------------"
-  echo $1
-  echo "--------------------------------------------------------------------"
+  echo "------------------------------------------------------------"
+  echo "$1"
+  echo "------------------------------------------------------------"
 }
 
+# -----------------------------------------------------------------
+# 1. Refresh Snap Store (optional but kept from original)
+# -----------------------------------------------------------------
+notify "Refreshing Snap Store"
+killall snap-store || true
+sudo snap refresh snap-store
 
+# -----------------------------------------------------------------
+# 2. System update & upgrade
+# -----------------------------------------------------------------
+notify "Updating system packages"
+sudo apt update && sudo apt upgrade -y && sudo apt dist-upgrade -y
 
-# ---------------------------
-# Update Snap Store
-# ---------------------------
+# -----------------------------------------------------------------
+# 3. (Optional) AMD GPU driver – keep only if you need a newer driver
+# -----------------------------------------------------------------
+# Comment out the whole block if you prefer Ubuntu's default driver.
+# notify "Installing AMDGPU driver from official repo"
+# wget https://repo.radeon.com/amdgpu-install/23.40.2/ubuntu/focal/amdgpu-install_6.0.60002-1_all.deb
+# sudo dpkg -i amdgpu-install_6.0.60002-1_all.deb
+# rm amdgpu-install_6.0.60002-1_all.deb
 
-killall snap-store && sudo snap refresh snap-store
+# -----------------------------------------------------------------
+# 4. System tuning for low‑latency audio
+# -----------------------------------------------------------------
+notify "Applying sysctl and realtime audio limits"
+echo -e "vm.swappiness=10\nfs.inotify.max_user_watches=600000" | sudo tee -a /etc/sysctl.conf >/dev/null
+echo -e "@audio - rtprio 90\n@audio - memlock unlimited" | sudo tee -a /etc/security/limits.d/audio.conf >/dev/null
 
-# ---------------------------
-# Update your system
-# ---------------------------
-sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
+# Add current user to the audio group (needed for real‑time scheduling)
+sudo adduser "$USER" audio
 
-# ---------------------------
-# GPU AMD Drivers
-# ---------------------------
-wget https://repo.radeon.com/amdgpu-install/23.40.2/ubuntu/focal/amdgpu-install_6.0.60002-1_all.deb
-sudo dpkg -i amdgpu-install_6.0.60002-1_all.deb
-
-# ---------------------------
-# Liquorix Kernel
-# ---------------------------
-curl -s 'https://liquorix.net/install-liquorix.sh' | sudo bash
-
-# ---------------------------
-# Modify GRUB options
-# threadirqs:
-# mitigations=off:
-# cpufreq.default_governor=performance:
-# ---------------------------
-sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/GRUB_CMDLINE_LINUX_DEFAULT="quiet threadirqs mitigations=off cpufreq.default_governor=performance"/g' /etc/default/grub
-sudo update-grub
-
-
-# ---------------------------
-# sysctl.conf
-# ---------------------------
-# See https://wiki.linuxaudio.org/wiki/system_configuration for more information.
-echo 'vm.swappiness=10
-fs.inotify.max_user_watches=600000' | sudo tee -a /etc/sysctl.conf
-
-# ---------------------------
-# audio.conf
-# ---------------------------
-# See https://wiki.linuxaudio.org/wiki/system_configuration for more information.
-echo '@audio - rtprio 90
-@audio - memlock unlimited' | sudo tee -a /etc/security/limits.d/audio.conf
-
-# ---------------------------
-# Add the user to the audio group
-# ---------------------------
-sudo adduser $USER audio
-
-# ---------------------------
-# Wine (staging)
-# This is required for yabridge
-# See https://wiki.winehq.org/Ubuntu and https://wiki.winehq.org/Winetricks for additional information.
-# ---------------------------
-sudo dpkg --add-architecture i386 
-sudo mkdir -pm755 /etc/apt/keyrings
+# -----------------------------------------------------------------
+# 5. Install Wine (staging) + winetricks
+# -----------------------------------------------------------------
+notify "Setting up Wine and winetricks"
+sudo dpkg --add-architecture i386
+sudo mkdir -p /etc/apt/keyrings
 sudo wget -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
 sudo wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/jammy/winehq-jammy.sources
-sudo apt update && sudo apt install --install-recommends winehq-stable
+sudo apt update
+sudo apt install --install-recommends -y winehq-stable
 
-# ---------------------------
-# Install Winetricks
-# See https://wiki.winehq.org/Ubuntu and https://wiki.winehq.org/Winetricks for additional information.
-# ---------------------------
-sudo apt install cabextract -y
-mkdir -p ~/.local/share
-wget -O winetricks https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks
-mv winetricks ~/.local/share
-chmod +x ~/.local/share/winetricks
-echo '' >> ~/.bash_aliases
-echo '# Audio: winetricks' >> ~/.bash_aliases
-echo 'export PATH="$PATH:$HOME/.local/share"' >> ~/.bash_aliases
-. ~/.bash_aliases
+# Install winetricks locally
+sudo apt install -y cabextract
+mkdir -p "$HOME/.local/share"
+wget -O "$HOME/.local/share/winetricks" https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks
+chmod +x "$HOME/.local/share/winetricks"
 
-# Base wine packages required for proper plugin functionality
-winetricks corefonts
+# Add winetricks to PATH via .bash_aliases (creates if missing)
+{
+  echo ''
+  echo '# Audio: winetricks'
+  echo 'export PATH="\$PATH:\$HOME/.local/share"'
+} >> "$HOME/.bash_aliases"
+source "$HOME/.bash_aliases"
 
-# Make a copy of .wine, as we will use this in the future as the base of
-# new wine prefixes (when installing plugins)
-cp -r ~/.wine ~/.wine-base
+# Install a minimal set of fonts (adjust as needed)
+"$HOME/.local/share/winetricks" corefonts
 
-# ---------------------------
-# Yabridge
-# ---------------------------
-wget -O yabridge.tar.gz https://github.com/robbert-vdh/yabridge/releases/download/5.1.0/yabridge-5.1.0.tar.gz
-mkdir -p ~/.local/share
-tar -C ~/.local/share -xavf yabridge.tar.gz
-rm yabridge.tar.gz
-echo '' >> ~/.bash_aliases
-echo '# Audio: yabridge path' >> ~/.bash_aliases
-echo 'export PATH="$PATH:$HOME/.local/share/yabridge"' >> ~/.bash_aliases
-. ~/.bash_aliases
-sudo apt install libnotify-bin -y
+# Preserve a clean baseline .wine directory
+cp -r "$HOME/.wine" "$HOME/.wine-base"
 
+# -----------------------------------------------------------------
+# 6. Install Yabridge (VST bridge for Wine)
+# -----------------------------------------------------------------
+notify "Installing Yabridge"
+YABRIDGE_URL="https://github.com/robbert-vdh/yabridge/releases/download/5.1.0/yabridge-5.1.0.tar.gz"
+wget -O "$HOME/yabridge.tar.gz" "$YABRIDGE_URL"
+mkdir -p "$HOME/.local/share"
+tar -C "$HOME/.local/share" -xavf "$HOME/yabridge.tar.gz"
+rm "$HOME/yabridge.tar.gz"
 
-# Create common VST paths
+{
+  echo ''
+  echo '# Audio: yabridge path'
+  echo 'export PATH="\$PATH:\$HOME/.local/share/yabridge"'
+} >> "$HOME/.bash_aliases"
+source "$HOME/.bash_aliases"
+
+# Install libnotify (used by yabridge UI)
+sudo apt install -y libnotify-bin
+
+# Create standard VST directories inside the Wine prefix
 mkdir -p "$HOME/.wine/drive_c/Program Files/Steinberg/VstPlugins"
 mkdir -p "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
 mkdir -p "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
 
-# Add them into yabridge
+# Register those folders with yabridge
 yabridgectl add "$HOME/.wine/drive_c/Program Files/Steinberg/VstPlugins"
 yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
 yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
 
+# -----------------------------------------------------------------
+# 7. Media codecs & common desktop apps
+# -----------------------------------------------------------------
+notify "Installing media codecs and common applications"
+sudo apt install -y ubuntu-restricted-extras vlc gimp deja-dup
 
-# ---------------------------
-# Media codecs
-# ---------------------------
-sudo apt install ubuntu-restricted-extras
+# Chrome (replace Firefox snap)
+sudo snap remove firefox || true
+wget -O "$HOME/google-chrome-stable_current_amd64.deb" \
+     https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+sudo apt install -y "./$HOME/google-chrome-stable_current_amd64.deb"
+rm "$HOME/google-chrome-stable_current_amd64.deb"
 
+# Piper (for gaming mouse configuration)
+sudo apt install -y piper
 
-# ---------------------------
-# VLC Media Player
-# ---------------------------
-sudo apt install vlc
+# -----------------------------------------------------------------
+# 8. Gaming platforms
+# -----------------------------------------------------------------
+notify "Setting up Steam, Flatpak, and related repos"
+sudo add-apt-repository -y multiverse
+sudo apt update
+sudo apt install -y steam
 
-# ---------------------------
-# minimize dock items onclick
-# ---------------------------
+# Flatpak + Flathub
+sudo apt install -y flatpak gnome-software-plugin-flatpak
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+# -----------------------------------------------------------------
+# 9. GNOME desktop tweaks
+# -----------------------------------------------------------------
+notify "Applying GNOME Dock tweak (click‑to‑minimize)"
 gsettings set org.gnome.shell.extensions.dash-to-dock click-action 'minimize'
 
-# ---------------------------
-# Backups and snapshots
-# ---------------------------
-sudo apt update
-sudo apt install -y deja-dup
+# -----------------------------------------------------------------
+# 10. Final cleanup
+# -----------------------------------------------------------------
+notify "Cleaning up"
+sudo apt autoremove -y
 
-# ---------------------------
-# Steam
-# ---------------------------
-sudo add-apt-repository multiverse
-sudo apt update
-sudo apt install steam
-# ---------------------------
-# Flatpak
-# ---------------------------
-sudo apt install flatpak
-sudo apt install gnome-software-plugin-flatpak
-flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-
-sudo apt update && sudo apt upgrade && sudo apt dist-upgrade -y
-# ---------------------------
-# Heroic
-# ---------------------------
-# Install via software centre 
-# ---------------------------
-# Discord
-# ---------------------------
-# Install Manually 
-
-# ---------------------------
-# Whatsapp
-# ---------------------------
-# install whatsie
-
-# ---------------------------
-# Bitwig
-# ---------------------------
-# Download .deb file and install with sudo apt
-
-# ---------------------------
-# install Chrome & remove Firefox
-# ---------------------------
-sudo snap remove firefox
-wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-sudo apt install ./google-chrome-stable_current_amd64.deb
-
-# ---------------------------
-# install piper
-# ---------------------------
-sudo apt update
-sudo apt install piper
-
-# ---------------------------
-# Install Gimp
-# ---------------------------
-sudo apt update
-sudo apt install -y gimp
-
-# ---------------------------
-# Cleanup
-# ---------------------------
-sudo apt autoremove
-
-reboot
+notify "Setup complete – you may now reboot"
+# Uncomment the next line if you want the script to reboot automatically:
+# sudo reboot
