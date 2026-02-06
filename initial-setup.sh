@@ -1,5 +1,3 @@
-## download bitwig before running script: https://www.bitwig.com/download/
-
 #!/usr/bin/env bash
 set -e
 
