@@ -1,3 +1,5 @@
+## download bitwig before running script: https://www.bitwig.com/download/
+
 #!/usr/bin/env bash
 set -e
 
@@ -19,7 +21,7 @@ sudo usermod -aG audio "$USER"
 sudo dpkg --add-architecture i386
 
 ############################################
-# WINEHQ (Noble)
+# WINEHQ (Ubuntu 24.04 Noble)
 ############################################
 sudo mkdir -pm755 /etc/apt/keyrings
 sudo wget -O /etc/apt/keyrings/winehq-archive.key \
@@ -73,12 +75,36 @@ yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
 yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
 
 ############################################
-# MEDIA + APPS
+# BITWIG STUDIO (DEB – REQUIRED FOR YABRIDGE)
+############################################
+BITWIG_DEB=$(ls "$HOME"/Downloads/bitwig-studio-*.deb 2>/dev/null | head -n 1)
+
+if [[ -f "$BITWIG_DEB" ]]; then
+    echo "🎹 Installing Bitwig Studio:"
+    echo "   $BITWIG_DEB"
+    sudo apt install -y "$BITWIG_DEB"
+else
+    echo "❌ Bitwig Studio .deb not found"
+    echo "➡ Download from https://www.bitwig.com/download/"
+    echo "➡ Save to ~/Downloads and re-run this script"
+    exit 1
+fi
+
+############################################
+# MEDIA + CREATIVE APPS
 ############################################
 sudo apt install -y ubuntu-restricted-extras vlc deja-dup gimp piper
+
+############################################
+# STEAM + GAMING
+############################################
 sudo add-apt-repository multiverse -y
 sudo apt update
-sudo apt install -y steam
+sudo apt install -y steam gamemode
+
+############################################
+# FLATPAK + HEROIC
+############################################
 sudo apt install -y flatpak gnome-software-plugin-flatpak
 flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 flatpak install -y flathub io.github.heroic-games-launcher.Heroic
@@ -106,10 +132,10 @@ rm google-chrome-stable_current_amd64.deb
 ############################################
 # LOW LATENCY KERNEL
 ############################################
-sudo apt install -y linux-lowlatency gamemode
+sudo apt install -y linux-lowlatency
 
 ############################################
-# PIPEWIRE (FOCUSRITE SAFE CONFIG)
+# PIPEWIRE (FOCUSRITE-SAFE CONFIG)
 ############################################
 mkdir -p ~/.config/pipewire/pipewire.conf.d
 cat <<EOF > ~/.config/pipewire/pipewire.conf.d/99-focusrite.conf
@@ -142,6 +168,8 @@ if [[ "$1" == "on" ]]; then
 elif [[ "$1" == "off" ]]; then
   ~/bin/pw-buffer.sh 128
   nvidia-settings -a '[gpu:0]/GpuPowerMizerMode=0' >/dev/null 2>&1 || true
+else
+  echo "Usage: studio-mode on|off"
 fi
 EOF
 
@@ -161,7 +189,7 @@ EOF
 chmod +x ~/bin/*
 
 ############################################
-# STEAM DESKTOP OVERRIDE
+# STEAM DESKTOP OVERRIDE (USER-ONLY)
 ############################################
 cp /usr/share/applications/steam.desktop ~/.local/share/applications/
 sed -i "s|^Exec=.*|Exec=$HOME/bin/steam-wrapper %U|" ~/.local/share/applications/steam.desktop
@@ -174,15 +202,19 @@ sudo apt install -y python3-gi gir1.2-appindicator3-0.1
 cat <<'EOF' > ~/bin/studio-tray.py
 #!/usr/bin/env python3
 import gi, subprocess
-gi.require_version("Gtk", "3.0")
-gi.require_version("AppIndicator3", "0.1")
+gi.require_version("Gtk","3.0")
+gi.require_version("AppIndicator3","0.1")
 from gi.repository import Gtk, AppIndicator3
 ind = AppIndicator3.Indicator.new("studio","audio-card",0)
 ind.set_status(1)
 menu = Gtk.Menu()
 for l,c in [("Studio ON",["studio-mode","on"]),("Studio OFF",["studio-mode","off"])]:
-    i=Gtk.MenuItem(label=l); i.connect("activate",lambda w,c=c:subprocess.Popen(c)); menu.append(i)
-menu.show_all(); ind.set_menu(menu); Gtk.main()
+    i=Gtk.MenuItem(label=l)
+    i.connect("activate",lambda w,c=c: subprocess.Popen(c))
+    menu.append(i)
+menu.show_all()
+ind.set_menu(menu)
+Gtk.main()
 EOF
 
 chmod +x ~/bin/studio-tray.py
@@ -196,7 +228,7 @@ X-GNOME-Autostart-enabled=true
 EOF
 
 ############################################
-# FINAL CLEANUP
+# FINAL STEPS
 ############################################
 grep -qxF 'export PATH="$PATH:$HOME/bin"' ~/.bash_aliases || \
 echo 'export PATH="$PATH:$HOME/bin"' >> ~/.bash_aliases
@@ -204,4 +236,4 @@ echo 'export PATH="$PATH:$HOME/bin"' >> ~/.bash_aliases
 systemctl --user restart pipewire pipewire-pulse
 sudo apt autoremove -y
 
-echo "✅ COMPLETE — Reboot recommended"
+echo "✅ SETUP COMPLETE — REBOOT RECOMMENDED"
