@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 echo "🎹🎮 Minimal Ubuntu Music + Gaming Setup with Studio/Game Mode + VST Sync Tray"
 
@@ -37,7 +37,7 @@ wget -O ~/.local/share/winetricks \
 https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks
 chmod +x ~/.local/share/winetricks
 export PATH="$HOME/.local/share:$PATH"
-winetricks -q corefonts
+~/.local/share/winetricks -q corefonts
 cp -r ~/.wine ~/.wine-base
 
 ############################################
@@ -49,7 +49,7 @@ https://github.com/robbert-vdh/yabridge/releases/download/${YABRIDGE_VERSION}/ya
 mkdir -p ~/.local/share
 tar -C ~/.local/share -xavf yabridge.tar.gz
 rm yabridge.tar.gz
-export PATH="$HOME/.local/share/yabridge:$PATH"
+export PATH="$HOME/.local/share:$HOME/.local/share/yabridge:$PATH"
 
 # VST PATHS
 mkdir -p "$HOME/.wine/drive_c/Program Files/Steinberg/VstPlugins"
@@ -75,11 +75,23 @@ else
 fi
 
 ############################################
-# STEAM
+# STEAM + GAMEMODE
 ############################################
 sudo add-apt-repository multiverse -y
 sudo apt update
-sudo apt install -y steam gamemode
+
+# Install Steam + GameMode via apt
+if ! dpkg -s steam &>/dev/null; then
+    echo "Installing Steam..."
+    sudo apt install -y steam gamemode || true
+fi
+
+# Fallback: install Steam via Flatpak if apt fails
+if ! command -v steam &>/dev/null; then
+    echo "Steam apt package failed, installing via Flatpak..."
+    sudo apt install -y flatpak
+    flatpak install -y flathub com.valvesoftware.Steam
+fi
 
 ############################################
 # LOW LATENCY KERNEL
@@ -163,39 +175,69 @@ sudo apt install -y python3-gi gir1.2-appindicator3-0.1
 
 cat <<'PYEOF' > ~/bin/studio-tray.py
 #!/usr/bin/env python3
-import gi, subprocess
-gi.require_version("Gtk","3.0")
-gi.require_version("AppIndicator3","0.1")
-from gi.repository import Gtk, AppIndicator3
+import gi, subprocess, os
+gi.require_version("Gtk", "3.0")
+gi.require_version("AppIndicator3", "0.1")
+from gi.repository import Gtk, AppIndicator3, GLib
 
-def run_command(cmd):
+current_mode = "Game"
+current_buffer = "128"
+
+icons = {
+    "Studio": "audio-card",
+    "Game": "applications-games"
+}
+
+def run_command(cmd, update_state=False, mode=None, buffer_size=None):
     subprocess.Popen(cmd)
+    global current_mode, current_buffer
+    if update_state:
+        if mode:
+            current_mode = mode
+        if buffer_size:
+            current_buffer = buffer_size
+    update_tray()
 
-ind = AppIndicator3.Indicator.new("studio","audio-card",0)
+def update_tray():
+    tooltip_text = f"{current_mode} Mode – {current_buffer} samples"
+    ind.set_label(tooltip_text, tooltip_text)
+    ind.set_icon_full(icons.get(current_mode, "audio-card"), current_mode)
+
+ind = AppIndicator3.Indicator.new(
+    "studio-tray",
+    icons[current_mode],
+    AppIndicator3.IndicatorCategory.APPLICATION_STATUS
+)
 ind.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
 
 menu = Gtk.Menu()
 
-# Studio submenu
 studio_menu_item = Gtk.MenuItem(label="Studio")
 studio_submenu = Gtk.Menu()
 
-# Enable Studio Mode
 studio_enable = Gtk.MenuItem(label="Enable Studio Mode")
-studio_enable.connect("activate", lambda w: run_command(["studio-mode","studio"]))
+studio_enable.connect(
+    "activate",
+    lambda w: run_command(
+        ["studio-mode", "studio"],
+        update_state=True,
+        mode="Studio",
+        buffer_size="64"
+    )
+)
 studio_submenu.append(studio_enable)
 
-# VST Sync
 vst_sync = Gtk.MenuItem(label="VST Sync")
 vst_sync.connect("activate", lambda w: run_command(["studio-sync"]))
 studio_submenu.append(vst_sync)
 
-# Buffer Switching submenu
 buffer_menu_item = Gtk.MenuItem(label="Buffer Switching")
 buffer_submenu = Gtk.Menu()
 for size in ["32", "64", "128", "256"]:
+    def make_cb(s):
+        return lambda w: run_command(["pw-buffer.sh", s], update_state=True, buffer_size=s)
     item = Gtk.MenuItem(label=f"{size} samples")
-    item.connect("activate", lambda w, s=size: run_command(["pw-buffer.sh", s]))
+    item.connect("activate", make_cb(size))
     buffer_submenu.append(item)
 buffer_menu_item.set_submenu(buffer_submenu)
 studio_submenu.append(buffer_menu_item)
@@ -203,13 +245,25 @@ studio_submenu.append(buffer_menu_item)
 studio_menu_item.set_submenu(studio_submenu)
 menu.append(studio_menu_item)
 
-# Game Mode
 game_item = Gtk.MenuItem(label="Game Mode")
-game_item.connect("activate", lambda w: run_command(["studio-mode","game"]))
+game_item.connect(
+    "activate",
+    lambda w: run_command(
+        ["studio-mode", "game"],
+        update_state=True,
+        mode="Game",
+        buffer_size="128"
+    )
+)
 menu.append(game_item)
+
+exit_item = Gtk.MenuItem(label="Quit")
+exit_item.connect("activate", lambda w: Gtk.main_quit())
+menu.append(exit_item)
 
 menu.show_all()
 ind.set_menu(menu)
+update_tray()
 Gtk.main()
 PYEOF
 
