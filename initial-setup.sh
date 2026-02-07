@@ -2,7 +2,7 @@
 # ==========================================================
 # Ubuntu 24.04 Studio + Gaming Hybrid Setup
 # Bitwig | Steam | Focusrite | YaBridge | NVIDIA
-# v2.2 – FULL FINAL SCRIPT
+# v2.5 – FULL SCRIPT WITH PERSISTENT TRAY, MUTUALLY EXCLUSIVE MODES
 # ==========================================================
 
 set -euo pipefail
@@ -39,7 +39,7 @@ sudo apt install -y \
   gnome-tweaks
 
 # ----------------------------------------------------------
-# Ubuntu low-latency kernel (OFFICIAL)
+# Ubuntu low-latency kernel
 # ----------------------------------------------------------
 if ! dpkg -l | grep -q linux-lowlatency; then
   echo "🧠 Installing low-latency kernel..."
@@ -49,7 +49,7 @@ else
 fi
 
 # ----------------------------------------------------------
-# Bitwig (from ~/Downloads)
+# Bitwig installation
 # ----------------------------------------------------------
 BITWIG_DEB="$HOME/Downloads/BitwigStudio.deb"
 if [[ -f "$BITWIG_DEB" ]]; then
@@ -59,10 +59,9 @@ else
 fi
 
 # ----------------------------------------------------------
-# Real-time audio permissions
+# Real-time audio privileges
 # ----------------------------------------------------------
 sudo usermod -aG audio,video "$USER"
-
 sudo tee /etc/security/limits.d/99-audio.conf >/dev/null <<EOF
 @audio   -  rtprio     95
 @audio   -  memlock    unlimited
@@ -75,7 +74,6 @@ EOF
 sudo tee /etc/udev/rules.d/90-focusrite.rules >/dev/null <<EOF
 SUBSYSTEM=="usb", ATTR{idVendor}=="1235", MODE="0666"
 EOF
-
 sudo udevadm control --reload
 
 # ----------------------------------------------------------
@@ -92,7 +90,7 @@ context.properties = {
 EOF
 
 # ----------------------------------------------------------
-# YaBridge (modern install – no make)
+# YaBridge installation
 # ----------------------------------------------------------
 if ! command -v yabridgectl >/dev/null; then
   echo "🔧 Installing YaBridge..."
@@ -103,70 +101,108 @@ if ! command -v yabridgectl >/dev/null; then
   chmod +x ~/.local/bin/yabridgectl ~/.local/share/yabridge/yabridge
   rm -rf /tmp/yabridge
 fi
-
 export PATH="$HOME/.local/bin:$PATH"
-
 yabridgectl set --path="$HOME/.wine/drive_c/Program Files/Common Files/VST2" || true
 
 # ----------------------------------------------------------
-# Mode scripts
+# Modes folder
 # ----------------------------------------------------------
 mkdir -p ~/modes
 
 # =======================
-# STUDIO MODE
+# STUDIO MODE SCRIPT
 # =======================
 cat > ~/modes/studio-mode.sh <<'EOF'
 #!/usr/bin/env bash
+# Activate Studio Mode
 echo "studio" > ~/.current_mode
 
-# CPU governor (portable)
+# CPU governor
 for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
   echo performance | sudo tee "$gov" >/dev/null || true
 done
 
+# Stop unnecessary services for studio
 sudo systemctl stop bluetooth cups 2>/dev/null || true
 echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null
 
+# Restart PipeWire
 systemctl --user restart pipewire pipewire-pulse wireplumber
-
-yad --notification --text="🎹 Studio Mode active"
 EOF
 chmod +x ~/modes/studio-mode.sh
 
 # =======================
-# GAME MODE
+# GAME MODE SCRIPT
 # =======================
 cat > ~/modes/game-mode.sh <<'EOF'
 #!/usr/bin/env bash
+# Activate Game Mode
 echo "game" > ~/.current_mode
 
-sudo systemctl start bluetooth cups 2>/dev/null || true
-
+# CPU governor
 for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
   echo performance | sudo tee "$gov" >/dev/null || true
 done
 
+# Restore services
+sudo systemctl start bluetooth cups 2>/dev/null || true
 echo 2 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null
 
+# NVIDIA persistence mode
 if command -v nvidia-smi >/dev/null; then
   sudo nvidia-smi -pm 1
 fi
-
-yad --notification --text="🎮 Game Mode active"
 EOF
 chmod +x ~/modes/game-mode.sh
 
 # ----------------------------------------------------------
-# SYSTEM TRAY SWITCHER (NO POPUP WINDOW)
+# SYSTEM TRAY SWITCHER SCRIPT (v2.5)
 # ----------------------------------------------------------
 cat > ~/modes/mode-switcher.sh <<'EOF'
 #!/usr/bin/env bash
 
-yad --notification \
-  --image=applications-system \
-  --text="Studio / Game Switcher" \
-  --menu="🎹 Studio Mode!$HOME/modes/studio-mode.sh|🎮 Game Mode!$HOME/modes/game-mode.sh|🔄 VST Sync!yabridgectl sync && yad --notification --text='VST Sync complete'|⏻ Quit!quit"
+MODE_FILE="$HOME/.current_mode"
+mkdir -p "$HOME"
+
+# Initialize mode file (default Game Mode)
+if [[ ! -f "$MODE_FILE" ]]; then
+    echo "game" > "$MODE_FILE"
+fi
+
+get_icon() {
+    mode=$(cat "$MODE_FILE")
+    if [[ "$mode" == "studio" ]]; then
+        echo "applications-multimedia"
+    else
+        echo "applications-games"
+    fi
+}
+
+run_mode() {
+    case "$1" in
+        studio)
+            "$HOME/modes/studio-mode.sh" ;;
+        game)
+            "$HOME/modes/game-mode.sh" ;;
+        vst)
+            yabridgectl sync
+            yad --notification --text="VST Sync Complete" ;;
+    esac
+}
+
+# Persistent tray icon
+while true; do
+    ICON=$(get_icon)
+    # The menu triggers on any click
+    yad --notification \
+        --image="$ICON" \
+        --text="Current Mode: $(cat $MODE_FILE)" \
+        --menu="🎹 Studio Mode!run_mode studio|🎮 Game Mode!run_mode game|🔄 VST Sync!run_mode vst" \
+        --listen | while read _; do
+            # No-op inside, handled by the menu
+            :
+        done
+done
 EOF
 chmod +x ~/modes/mode-switcher.sh
 
@@ -182,5 +218,5 @@ Name=Mode Switcher
 X-GNOME-Autostart-enabled=true
 EOF
 
-echo "✅ Setup complete."
-echo "🔁 REBOOT REQUIRED to boot low-latency kernel"
+echo "✅ v2.5 setup complete."
+echo "🔁 REBOOT REQUIRED to boot low-latency kernel and apply permissions"
