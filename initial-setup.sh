@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ==========================================================
-# Ubuntu Studio / Gaming Dual Environment
-# Ubuntu 24.04 LTS
-# v2.1 – FULL CONSOLIDATED SCRIPT
+# Ubuntu 24.04 Studio + Gaming Hybrid Setup
+# Bitwig | Steam | Focusrite | YaBridge | NVIDIA
+# v2.2 – FULL FINAL SCRIPT
 # ==========================================================
 
 set -euo pipefail
 
-echo "🚀 Ubuntu Studio / Gaming setup starting..."
+echo "🚀 Starting Ubuntu Studio / Gaming setup..."
 
 # ----------------------------------------------------------
 # Keep sudo alive
@@ -34,17 +34,15 @@ sudo apt install -y \
   jackd2 qjackctl \
   alsa-utils pavucontrol \
   wine winetricks \
-  steam \
-  gamemode \
-  yad \
-  gdebi-core \
+  steam gamemode \
+  yad gdebi-core \
   gnome-tweaks
 
 # ----------------------------------------------------------
 # Ubuntu low-latency kernel (OFFICIAL)
 # ----------------------------------------------------------
 if ! dpkg -l | grep -q linux-lowlatency; then
-  echo "🧠 Installing Ubuntu low-latency kernel..."
+  echo "🧠 Installing low-latency kernel..."
   sudo apt install -y linux-lowlatency
 else
   echo "✅ Low-latency kernel already installed"
@@ -61,7 +59,7 @@ else
 fi
 
 # ----------------------------------------------------------
-# Real-time audio limits
+# Real-time audio permissions
 # ----------------------------------------------------------
 sudo usermod -aG audio,video "$USER"
 
@@ -94,10 +92,10 @@ context.properties = {
 EOF
 
 # ----------------------------------------------------------
-# YaBridge (NO MAKE STEP – FIXES YOUR ERROR)
+# YaBridge (modern install – no make)
 # ----------------------------------------------------------
 if ! command -v yabridgectl >/dev/null; then
-  echo "🔧 Installing yabridge..."
+  echo "🔧 Installing YaBridge..."
   git clone https://github.com/robbert-vdh/yabridge.git /tmp/yabridge
   mkdir -p ~/.local/bin ~/.local/share/yabridge
   cp /tmp/yabridge/yabridge ~/.local/share/yabridge/
@@ -159,32 +157,21 @@ yad --notification --text="🎮 Game Mode active"
 EOF
 chmod +x ~/modes/game-mode.sh
 
-# =======================
-# MODE SWITCHER (Tray)
-# =======================
+# ----------------------------------------------------------
+# SYSTEM TRAY SWITCHER (NO POPUP WINDOW)
+# ----------------------------------------------------------
 cat > ~/modes/mode-switcher.sh <<'EOF'
 #!/usr/bin/env bash
-while true; do
-  CHOICE=$(yad --list --column=Mode \
-    "Studio Mode" \
-    "Game Mode" \
-    "VST Sync" \
-    --width=300 --height=200 \
-    --title="Mode Switcher" \
-    --button=gtk-cancel:1)
 
-  case "$CHOICE" in
-    "Studio Mode") ~/modes/studio-mode.sh ;;
-    "Game Mode")   ~/modes/game-mode.sh ;;
-    "VST Sync")    yabridgectl sync && yad --info --text="VST Sync complete" ;;
-    *) exit 0 ;;
-  esac
-done
+yad --notification \
+  --image=applications-system \
+  --text="Studio / Game Switcher" \
+  --menu="🎹 Studio Mode!$HOME/modes/studio-mode.sh|🎮 Game Mode!$HOME/modes/game-mode.sh|🔄 VST Sync!yabridgectl sync && yad --notification --text='VST Sync complete'|⏻ Quit!quit"
 EOF
 chmod +x ~/modes/mode-switcher.sh
 
 # ----------------------------------------------------------
-# Autostart tray
+# Autostart tray icon
 # ----------------------------------------------------------
 mkdir -p ~/.config/autostart
 cat > ~/.config/autostart/mode-switcher.desktop <<EOF
