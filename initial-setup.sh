@@ -1,290 +1,199 @@
 #!/usr/bin/env bash
+# ==========================================================
+# Ubuntu Studio / Gaming Dual Environment
+# Ubuntu 24.04 LTS
+# v2.1 – FULL CONSOLIDATED SCRIPT
+# ==========================================================
+
 set -euo pipefail
 
-echo "🎹🎮 Minimal Ubuntu Music + Gaming Setup with Studio/Game Mode + VST Sync Tray"
+echo "🚀 Ubuntu Studio / Gaming setup starting..."
 
-############################################
-# AUDIO RT LIMITS
-############################################
-sudo tee /etc/security/limits.d/audio.conf >/dev/null <<EOF
-@audio - rtprio 90
-@audio - memlock unlimited
-EOF
+# ----------------------------------------------------------
+# Keep sudo alive
+# ----------------------------------------------------------
+sudo -v
+( while true; do sudo -n true; sleep 60; done ) &
+SUDO_PID=$!
+trap 'kill $SUDO_PID' EXIT
 
-sudo usermod -aG audio "$USER"
-
-############################################
-# ENABLE i386 (Wine)
-############################################
-sudo dpkg --add-architecture i386
-
-############################################
-# WINEHQ
-############################################
-sudo mkdir -pm755 /etc/apt/keyrings
-sudo wget -O /etc/apt/keyrings/winehq-archive.key \
-https://dl.winehq.org/wine-builds/winehq.key
-sudo wget -NP /etc/apt/sources.list.d/ \
-https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources
+# ----------------------------------------------------------
+# System update
+# ----------------------------------------------------------
 sudo apt update
-sudo apt install --install-recommends -y winehq-stable cabextract
+sudo apt -y upgrade
+sudo apt -y autoremove
 
-############################################
-# WINETRICKS
-############################################
-mkdir -p ~/.local/share
-wget -O ~/.local/share/winetricks \
-https://raw.githubusercontent.com/Winetricks/winetricks/master/src/winetricks
-chmod +x ~/.local/share/winetricks
-export PATH="$HOME/.local/share:$PATH"
-~/.local/share/winetricks -q corefonts
-cp -r ~/.wine ~/.wine-base
+# ----------------------------------------------------------
+# Base packages
+# ----------------------------------------------------------
+sudo apt install -y \
+  build-essential git curl wget \
+  pipewire pipewire-jack pipewire-audio-client-libraries \
+  wireplumber \
+  jackd2 qjackctl \
+  alsa-utils pavucontrol \
+  wine winetricks \
+  steam \
+  gamemode \
+  yad \
+  gdebi-core \
+  gnome-tweaks
 
-############################################
-# YABRIDGE
-############################################
-YABRIDGE_VERSION="5.1.1"
-wget -O yabridge.tar.gz \
-https://github.com/robbert-vdh/yabridge/releases/download/${YABRIDGE_VERSION}/yabridge-${YABRIDGE_VERSION}.tar.gz
-mkdir -p ~/.local/share
-tar -C ~/.local/share -xavf yabridge.tar.gz
-rm yabridge.tar.gz
-export PATH="$HOME/.local/share:$HOME/.local/share/yabridge:$PATH"
+# ----------------------------------------------------------
+# Ubuntu low-latency kernel (OFFICIAL)
+# ----------------------------------------------------------
+if ! dpkg -l | grep -q linux-lowlatency; then
+  echo "🧠 Installing Ubuntu low-latency kernel..."
+  sudo apt install -y linux-lowlatency
+else
+  echo "✅ Low-latency kernel already installed"
+fi
 
-# VST PATHS
-mkdir -p "$HOME/.wine/drive_c/Program Files/Steinberg/VstPlugins"
-mkdir -p "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
-mkdir -p "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
-
-~/.local/share/yabridge/yabridgectl add "$HOME/.wine/drive_c/Program Files/Steinberg/VstPlugins"
-~/.local/share/yabridge/yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST2"
-~/.local/share/yabridge/yabridgectl add "$HOME/.wine/drive_c/Program Files/Common Files/VST3"
-
-############################################
-# BITWIG STUDIO (DEB)
-############################################
-BITWIG_DEB=$(ls "$HOME"/Downloads/bitwig-studio-*.deb 2>/dev/null | head -n 1)
+# ----------------------------------------------------------
+# Bitwig (from ~/Downloads)
+# ----------------------------------------------------------
+BITWIG_DEB="$HOME/Downloads/BitwigStudio.deb"
 if [[ -f "$BITWIG_DEB" ]]; then
-    echo "🎹 Installing Bitwig Studio from $BITWIG_DEB"
-    sudo apt install -y "$BITWIG_DEB"
+  sudo gdebi -n "$BITWIG_DEB"
 else
-    echo "❌ Bitwig Studio .deb not found!"
-    echo "➡ Download from https://www.bitwig.com/download/"
-    echo "➡ Save to ~/Downloads and re-run this script"
-    exit 1
+  echo "⚠️ BitwigStudio.deb not found – skipping"
 fi
 
-############################################
-# STEAM + GAMEMODE
-############################################
-sudo add-apt-repository multiverse -y
-sudo apt update
+# ----------------------------------------------------------
+# Real-time audio limits
+# ----------------------------------------------------------
+sudo usermod -aG audio,video "$USER"
 
-# Install Steam + GameMode via apt
-if ! dpkg -s steam &>/dev/null; then
-    echo "Installing Steam..."
-    sudo apt install -y steam gamemode || true
-fi
+sudo tee /etc/security/limits.d/99-audio.conf >/dev/null <<EOF
+@audio   -  rtprio     95
+@audio   -  memlock    unlimited
+@audio   -  nice      -19
+EOF
 
-# Fallback: install Steam via Flatpak if apt fails
-if ! command -v steam &>/dev/null; then
-    echo "Steam apt package failed, installing via Flatpak..."
-    sudo apt install -y flatpak
-    flatpak install -y flathub com.valvesoftware.Steam
-fi
+# ----------------------------------------------------------
+# Focusrite USB priority
+# ----------------------------------------------------------
+sudo tee /etc/udev/rules.d/90-focusrite.rules >/dev/null <<EOF
+SUBSYSTEM=="usb", ATTR{idVendor}=="1235", MODE="0666"
+EOF
 
-############################################
-# LOW LATENCY KERNEL
-############################################
-sudo apt install -y linux-lowlatency
+sudo udevadm control --reload
 
-############################################
-# PIPEWIRE FOCUSRITE CONFIG
-############################################
+# ----------------------------------------------------------
+# PipeWire low-latency tuning
+# ----------------------------------------------------------
 mkdir -p ~/.config/pipewire/pipewire.conf.d
-cat <<EOF > ~/.config/pipewire/pipewire.conf.d/99-focusrite.conf
+cat > ~/.config/pipewire/pipewire.conf.d/99-lowlatency.conf <<EOF
 context.properties = {
-    default.clock.rate = 48000
-    default.clock.allowed-rates = [ 48000 ]
-    default.clock.quantum = 128
-    default.clock.min-quantum = 32
-    default.clock.max-quantum = 256
+  default.clock.rate        = 48000
+  default.clock.quantum     = 128
+  default.clock.min-quantum = 64
+  default.clock.max-quantum = 256
 }
 EOF
 
-############################################
-# STUDIO/GAME MODE + BUFFER SCRIPTS
-############################################
-mkdir -p ~/bin ~/.config/autostart ~/.local/share/applications
-
-# Buffer control
-cat <<'EOF' > ~/bin/pw-buffer.sh
-#!/usr/bin/env bash
-pw-metadata -n settings 0 clock.force-quantum "$1"
-pw-metadata -n settings 0 clock.force-rate 48000
-EOF
-
-# Studio/Game Mode toggle
-cat <<'EOF' > ~/bin/studio-mode
-#!/usr/bin/env bash
-if [[ "$1" == "studio" ]]; then
-    ~/bin/pw-buffer.sh 64
-    gamemoderun true
-    echo "🎹 Studio Mode ON"
-elif [[ "$1" == "game" ]]; then
-    ~/bin/pw-buffer.sh 128
-    echo "🎮 Game Mode ON"
-else
-    echo "Usage: studio-mode studio|game"
+# ----------------------------------------------------------
+# YaBridge (NO MAKE STEP – FIXES YOUR ERROR)
+# ----------------------------------------------------------
+if ! command -v yabridgectl >/dev/null; then
+  echo "🔧 Installing yabridge..."
+  git clone https://github.com/robbert-vdh/yabridge.git /tmp/yabridge
+  mkdir -p ~/.local/bin ~/.local/share/yabridge
+  cp /tmp/yabridge/yabridge ~/.local/share/yabridge/
+  cp /tmp/yabridge/yabridgectl ~/.local/bin/
+  chmod +x ~/.local/bin/yabridgectl ~/.local/share/yabridge/yabridge
+  rm -rf /tmp/yabridge
 fi
-EOF
 
-# Bitwig project wrapper (per-project buffer)
-cat <<'EOF' > ~/bin/bitwig-project.sh
+export PATH="$HOME/.local/bin:$PATH"
+
+yabridgectl set --path="$HOME/.wine/drive_c/Program Files/Common Files/VST2" || true
+
+# ----------------------------------------------------------
+# Mode scripts
+# ----------------------------------------------------------
+mkdir -p ~/modes
+
+# =======================
+# STUDIO MODE
+# =======================
+cat > ~/modes/studio-mode.sh <<'EOF'
 #!/usr/bin/env bash
-~/bin/pw-buffer.sh "$2"
-gamemoderun bitwig-studio "$1"
-~/bin/pw-buffer.sh 128
-EOF
+echo "studio" > ~/.current_mode
 
-# Steam wrapper disables Studio Mode
-cat <<'EOF' > ~/bin/steam-wrapper
+# CPU governor (portable)
+for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+  echo performance | sudo tee "$gov" >/dev/null || true
+done
+
+sudo systemctl stop bluetooth cups 2>/dev/null || true
+echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null
+
+systemctl --user restart pipewire pipewire-pulse wireplumber
+
+yad --notification --text="🎹 Studio Mode active"
+EOF
+chmod +x ~/modes/studio-mode.sh
+
+# =======================
+# GAME MODE
+# =======================
+cat > ~/modes/game-mode.sh <<'EOF'
 #!/usr/bin/env bash
-studio-mode game
-exec /usr/bin/steam "$@"
-EOF
+echo "game" > ~/.current_mode
 
-# Studio VST Sync
-cat <<'EOF' > ~/bin/studio-sync
+sudo systemctl start bluetooth cups 2>/dev/null || true
+
+for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+  echo performance | sudo tee "$gov" >/dev/null || true
+done
+
+echo 2 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null
+
+if command -v nvidia-smi >/dev/null; then
+  sudo nvidia-smi -pm 1
+fi
+
+yad --notification --text="🎮 Game Mode active"
+EOF
+chmod +x ~/modes/game-mode.sh
+
+# =======================
+# MODE SWITCHER (Tray)
+# =======================
+cat > ~/modes/mode-switcher.sh <<'EOF'
 #!/usr/bin/env bash
-echo "🔄 Syncing Yabridge VSTs..."
-~/.local/share/yabridge/yabridgectl sync
-echo "✅ Yabridge VST Sync Complete!"
+while true; do
+  CHOICE=$(yad --list --column=Mode \
+    "Studio Mode" \
+    "Game Mode" \
+    "VST Sync" \
+    --width=300 --height=200 \
+    --title="Mode Switcher" \
+    --button=gtk-cancel:1)
+
+  case "$CHOICE" in
+    "Studio Mode") ~/modes/studio-mode.sh ;;
+    "Game Mode")   ~/modes/game-mode.sh ;;
+    "VST Sync")    yabridgectl sync && yad --info --text="VST Sync complete" ;;
+    *) exit 0 ;;
+  esac
+done
 EOF
+chmod +x ~/modes/mode-switcher.sh
 
-chmod +x ~/bin/*
-
-# Override Steam desktop launcher
-cp /usr/share/applications/steam.desktop ~/.local/share/applications/
-sed -i "s|^Exec=.*|Exec=$HOME/bin/steam-wrapper %U|" ~/.local/share/applications/steam.desktop
-
-############################################
-# HIERARCHICAL STUDIO/GAME TRAY
-############################################
-sudo apt install -y python3-gi gir1.2-appindicator3-0.1
-
-cat <<'PYEOF' > ~/bin/studio-tray.py
-#!/usr/bin/env python3
-import gi, subprocess, os
-gi.require_version("Gtk", "3.0")
-gi.require_version("AppIndicator3", "0.1")
-from gi.repository import Gtk, AppIndicator3, GLib
-
-current_mode = "Game"
-current_buffer = "128"
-
-icons = {
-    "Studio": "audio-card",
-    "Game": "applications-games"
-}
-
-def run_command(cmd, update_state=False, mode=None, buffer_size=None):
-    subprocess.Popen(cmd)
-    global current_mode, current_buffer
-    if update_state:
-        if mode:
-            current_mode = mode
-        if buffer_size:
-            current_buffer = buffer_size
-    update_tray()
-
-def update_tray():
-    tooltip_text = f"{current_mode} Mode – {current_buffer} samples"
-    ind.set_label(tooltip_text, tooltip_text)
-    ind.set_icon_full(icons.get(current_mode, "audio-card"), current_mode)
-
-ind = AppIndicator3.Indicator.new(
-    "studio-tray",
-    icons[current_mode],
-    AppIndicator3.IndicatorCategory.APPLICATION_STATUS
-)
-ind.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
-
-menu = Gtk.Menu()
-
-studio_menu_item = Gtk.MenuItem(label="Studio")
-studio_submenu = Gtk.Menu()
-
-studio_enable = Gtk.MenuItem(label="Enable Studio Mode")
-studio_enable.connect(
-    "activate",
-    lambda w: run_command(
-        ["studio-mode", "studio"],
-        update_state=True,
-        mode="Studio",
-        buffer_size="64"
-    )
-)
-studio_submenu.append(studio_enable)
-
-vst_sync = Gtk.MenuItem(label="VST Sync")
-vst_sync.connect("activate", lambda w: run_command(["studio-sync"]))
-studio_submenu.append(vst_sync)
-
-buffer_menu_item = Gtk.MenuItem(label="Buffer Switching")
-buffer_submenu = Gtk.Menu()
-for size in ["32", "64", "128", "256"]:
-    def make_cb(s):
-        return lambda w: run_command(["pw-buffer.sh", s], update_state=True, buffer_size=s)
-    item = Gtk.MenuItem(label=f"{size} samples")
-    item.connect("activate", make_cb(size))
-    buffer_submenu.append(item)
-buffer_menu_item.set_submenu(buffer_submenu)
-studio_submenu.append(buffer_menu_item)
-
-studio_menu_item.set_submenu(studio_submenu)
-menu.append(studio_menu_item)
-
-game_item = Gtk.MenuItem(label="Game Mode")
-game_item.connect(
-    "activate",
-    lambda w: run_command(
-        ["studio-mode", "game"],
-        update_state=True,
-        mode="Game",
-        buffer_size="128"
-    )
-)
-menu.append(game_item)
-
-exit_item = Gtk.MenuItem(label="Quit")
-exit_item.connect("activate", lambda w: Gtk.main_quit())
-menu.append(exit_item)
-
-menu.show_all()
-ind.set_menu(menu)
-update_tray()
-Gtk.main()
-PYEOF
-
-chmod +x ~/bin/studio-tray.py
-
+# ----------------------------------------------------------
 # Autostart tray
-cat <<EOF > ~/.config/autostart/studio-tray.desktop
+# ----------------------------------------------------------
+mkdir -p ~/.config/autostart
+cat > ~/.config/autostart/mode-switcher.desktop <<EOF
 [Desktop Entry]
 Type=Application
-Exec=$HOME/bin/studio-tray.py
-Name=Studio/Game Mode + VST Sync
+Exec=$HOME/modes/mode-switcher.sh
+Name=Mode Switcher
 X-GNOME-Autostart-enabled=true
 EOF
 
-############################################
-# FINAL CLEANUP
-############################################
-grep -qxF 'export PATH="$PATH:$HOME/bin"' ~/.bash_aliases || \
-echo 'export PATH="$PATH:$HOME/bin"' >> ~/.bash_aliases
-
-systemctl --user restart pipewire pipewire-pulse
-sudo apt autoremove -y
-
-echo "✅ MINIMAL SETUP COMPLETE — REBOOT RECOMMENDED"
+echo "✅ Setup complete."
+echo "🔁 REBOOT REQUIRED to boot low-latency kernel"
