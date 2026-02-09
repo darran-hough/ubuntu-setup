@@ -17,7 +17,6 @@ AUTOSTART_FILE="$AUTOSTART_DIR/mode-tray.desktop"
 
 YABRIDGE_VERSION="5.1.0"
 YABRIDGE_URL="https://github.com/robbert-vdh/yabridge/releases/download/${YABRIDGE_VERSION}/yabridge-${YABRIDGE_VERSION}.tar.gz"
-YABRIDGE_BIN="$HOME_DIR/.local/share/yabridge/yabridgectl"
 
 ########################################
 # Helpers
@@ -49,18 +48,44 @@ if [[ "$MODE" != "audio" && "$MODE" != "gaming" ]]; then
 fi
 
 AUDIO_LIMITS_FILE="/etc/security/limits.d/audio.conf"
+PIPEWIRE_CONFIG_DIR="$HOME/.config/pipewire"
+PIPEWIRE_CONF_FILE="$PIPEWIRE_CONFIG_DIR/pipewire.conf"
+
+mkdir -p "$PIPEWIRE_CONFIG_DIR"
+
+# Backup old file
+if [[ -f "$PIPEWIRE_CONF_FILE" ]]; then
+  cp "$PIPEWIRE_CONF_FILE" "${PIPEWIRE_CONF_FILE}.bak.$(date +%F_%T)"
+fi
+
+function set_pipewire_buffer() {
+  local size="$1"
+  cat > "$PIPEWIRE_CONF_FILE" <<EOF2
+context.properties = {
+  default.clock.rate          = 48000
+  default.clock.quantum       = 1024
+  jack.buffer_size            = $size
+}
+EOF2
+}
 
 if [[ "$MODE" == "audio" ]]; then
   echo "🎧 Switching to AUDIO mode..."
+
   sudo tee "$AUDIO_LIMITS_FILE" >/dev/null <<EOF2
 @audio   -  rtprio     95
 @audio   -  memlock    unlimited
 @audio   -  nice      -19
 EOF2
 
+  set_pipewire_buffer 128
+
   echo "🔧 Enabling TLP..."
   sudo systemctl enable tlp || true
   sudo systemctl restart tlp || true
+
+  echo "🔁 Reloading PipeWire..."
+  systemctl --user restart pipewire pipewire-pulse
 
   echo "✅ AUDIO mode enabled."
   exit 0
@@ -68,11 +93,17 @@ fi
 
 if [[ "$MODE" == "gaming" ]]; then
   echo "🎮 Switching to GAMING mode..."
+
   sudo rm -f "$AUDIO_LIMITS_FILE"
+
+  set_pipewire_buffer 512
 
   echo "🔧 Disabling TLP..."
   sudo systemctl stop tlp || true
   sudo systemctl disable tlp || true
+
+  echo "🔁 Reloading PipeWire..."
+  systemctl --user restart pipewire pipewire-pulse
 
   echo "✅ GAMING mode enabled."
   exit 0
@@ -93,7 +124,7 @@ import os
 import sys
 import subprocess
 from pathlib import Path
-from PyQt6 import QtWidgets, QtGui
+from PyQt6 import QtWidgets, QtGui, QtCore
 
 HOME = str(Path.home())
 MODE_SWITCHER = os.path.join(HOME, "mode-switcher.sh")
@@ -105,11 +136,12 @@ def run_cmd(cmd):
 def set_mode(mode):
     if mode not in ["audio", "gaming"]:
         return False
-    run_cmd(f"bash {MODE_SWITCHER} {mode}")
-    return True
+    result = run_cmd(f"sudo bash {MODE_SWITCHER} {mode}")
+    return result.returncode == 0
 
 def sync_vst():
-    run_cmd(f"{YABRIDGECTL} sync")
+    result = run_cmd(f"{YABRIDGECTL} sync")
+    return result.returncode == 0
 
 def get_current_mode():
     limits_file = "/etc/security/limits.d/audio.conf"
@@ -138,14 +170,18 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
 
         self.setContextMenu(self.menu)
 
-        # Use default icons
         self.audio_icon = QtGui.QIcon.fromTheme("media-playback-start")
         self.game_icon = QtGui.QIcon.fromTheme("applications-games")
 
+        self.current_mode = get_current_mode()
         self.update_icon()
 
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.poll_mode)
+        self.timer.start(3000)
+
     def update_icon(self):
-        mode = get_current_mode()
+        mode = self.current_mode
         if mode == "audio":
             self.setIcon(self.audio_icon)
             self.setToolTip("Studio Mode")
@@ -153,16 +189,25 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
             self.setIcon(self.game_icon)
             self.setToolTip("Game Mode")
 
+    def poll_mode(self):
+        new_mode = get_current_mode()
+        if new_mode != self.current_mode:
+            self.current_mode = new_mode
+            self.update_icon()
+
     def enable_studio(self):
         set_mode("audio")
+        self.current_mode = "audio"
         self.update_icon()
 
     def vst_sync(self):
         sync_vst()
+        self.current_mode = get_current_mode()
         self.update_icon()
 
     def enable_game(self):
         set_mode("gaming")
+        self.current_mode = "gaming"
         self.update_icon()
 
 def main():
@@ -188,7 +233,7 @@ cat > "$AUTOSTART_FILE" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Studio/Game Mode Switcher
-Exec=/usr/bin/python3 $TRAY_APP
+Exec=python3 $TRAY_APP
 X-GNOME-Autostart-enabled=true
 EOF
 }
@@ -236,9 +281,9 @@ function install_all() {
     echo 'export PATH="$HOME_DIR/.local/bin:$PATH"' >> "$HOME_DIR/.profile"
   fi
 
-  export WINEPREFIX="$HOME_DIR/.wine-audio"
-  export WINEARCH=win64
-  wineboot -u
+  sudo tee /etc/sudoers.d/mode-switcher >/dev/null <<EOF
+%$USER_NAME ALL=(ALL) NOPASSWD: /usr/bin/bash $MODE_SWITCHER
+EOF
 
   write_mode_switcher
   write_tray_app
@@ -252,7 +297,4 @@ function install_all() {
   echo "🎮 Game mode is set as default."
 }
 
-########################################
-# Main
-########################################
 install_all
