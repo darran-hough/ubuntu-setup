@@ -1,21 +1,17 @@
 #!/usr/bin/env bash
 set -e
 
-# ================================
-# Ubuntu Ultimate Audio + Gaming Setup
+# ===============================================
+# Ubuntu 24.04 Ultimate Audio + Gaming Setup
 # Supports: --dryrun
-# ================================
+# ===============================================
 
-# Default
 DRY_RUN=false
-
-# Parse command-line argument
 if [[ "$1" == "--dryrun" ]]; then
     DRY_RUN=true
     echo "=== Running in DRY-RUN mode ==="
 fi
 
-# Helper function to conditionally run commands
 run_cmd() {
     if [ "$DRY_RUN" = true ]; then
         echo "[DRY-RUN] $*"
@@ -39,10 +35,10 @@ echo "Dry-run mode: $DRY_RUN"
 run_cmd sudo apt update
 run_cmd sudo apt upgrade -y
 
-# Low-latency kernel for audio
 run_cmd sudo apt install -y linux-lowlatency linux-headers-lowlatency \
     pipewire pipewire-jack wireplumber alsa-utils rtkit gamemode \
-    winetricks fonts-wine cabextract unzip wget gnupg2 software-properties-common
+    winetricks fonts-wine cabextract unzip wget gnupg2 software-properties-common \
+    python3-pyqt6 python3-pyqt6.qtsvg python3-pip
 
 ############################
 # PIPEWIRE ENABLE
@@ -79,12 +75,6 @@ context.properties = {
     realtime.priority = 88
 }
 EOF
-
-############################
-# CPU ISOLATION (2–3 AUDIO)
-############################
-run_cmd sudo sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash isolcpus=2,3 nohz_full=2,3 rcu_nocbs=2,3 threadirqs"/' /etc/default/grub
-run_cmd sudo update-grub
 
 ############################
 # NVIDIA WAYLAND
@@ -145,51 +135,25 @@ ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1235", TEST=="power/control", 
 EOF
 
 ############################
-# PIPEWIRE AUTO QUANTUM
+# PIPEWIRE PROFILES
 ############################
 run_cmd mkdir -p "$HOME_DIR/.local/bin"
 
+# Studio
 run_cmd tee "$HOME_DIR/.local/bin/pw-daw.sh" > /dev/null <<EOF
 #!/bin/bash
 pw-metadata -n settings 0 clock.force-rate 48000
 pw-metadata -n settings 0 clock.force-quantum 64
 EOF
 
+# Game
 run_cmd tee "$HOME_DIR/.local/bin/pw-game.sh" > /dev/null <<EOF
 #!/bin/bash
 pw-metadata -n settings 0 clock.force-rate 48000
 pw-metadata -n settings 0 clock.force-quantum 256
 EOF
 
-run_cmd tee "$HOME_DIR/.local/bin/pw-auto.sh" > /dev/null <<EOF
-#!/bin/bash
-if pgrep -x bitwig-studio; then
-    "$HOME_DIR/.local/bin/pw-daw.sh"
-else
-    "$HOME_DIR/.local/bin/pw-game.sh"
-fi
-EOF
-
 run_cmd chmod +x "$HOME_DIR/.local/bin"/pw-*.sh
-
-run_cmd mkdir -p "$HOME_DIR/.config/systemd/user"
-
-run_cmd tee "$HOME_DIR/.config/systemd/user/pw-auto.service" > /dev/null <<EOF
-[Service]
-ExecStart=$HOME_DIR/.local/bin/pw-auto.sh
-EOF
-
-run_cmd tee "$HOME_DIR/.config/systemd/user/pw-auto.timer" > /dev/null <<EOF
-[Timer]
-OnBootSec=10
-OnUnitActiveSec=5
-
-[Install]
-WantedBy=timers.target
-EOF
-
-run_cmd systemctl --user daemon-reexec
-run_cmd systemctl --user enable pw-auto.timer
 
 ############################
 # STEAM CPU AFFINITY
@@ -207,28 +171,22 @@ run_cmd systemctl --user enable steam-affinity.service
 ############################
 run_cmd tee "$HOME_DIR/.local/bin/bitwig-rt.sh" > /dev/null <<EOF
 #!/bin/bash
-exec taskset -c 2,3 chrt -f 88 bitwig-studio
+exec chrt -f 88 bitwig-studio
 EOF
 
 run_cmd chmod +x "$HOME_DIR/.local/bin/bitwig-rt.sh"
 
 ############################
-# WINEHQ INSTALLATION
+# WINEHQ + YABRIDGE
 ############################
-# Add 32-bit support
 run_cmd sudo dpkg --add-architecture i386
-
-# Add WineHQ key and repo
 run_cmd wget -O- https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor --output /usr/share/keyrings/winehq-archive.key
 run_cmd sudo tee /etc/apt/sources.list.d/winehq.list > /dev/null <<EOF
 deb [signed-by=/usr/share/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/ubuntu/ noble main
 EOF
-
-# Install Wine
 run_cmd sudo apt update
 run_cmd sudo apt install --install-recommends winehq-stable -y
 
-# Setup yabridge Wine prefix
 run_cmd mkdir -p "$WINEPREFIX"
 run_cmd export WINEPREFIX="$WINEPREFIX"
 run_cmd export WINEARCH=win64
@@ -242,13 +200,8 @@ run_cmd yabridgectl sync
 # BITWIG INSTALLER
 ############################
 BITWIG_INSTALLER=$(ls -t $HOME_DIR/Downloads/Bitwig_Studio_* | head -n 1 || true)
-
-if [ -z "$BITWIG_INSTALLER" ]; then
-    echo "[INFO] No Bitwig installer found in ~/Downloads. Skipping installation."
-else
-    echo "[INFO] Found Bitwig installer: $BITWIG_INSTALLER"
+if [ -n "$BITWIG_INSTALLER" ]; then
     run_cmd chmod +x "$BITWIG_INSTALLER"
-    echo "[INFO] Launching Bitwig installer in Wine prefix..."
     run_cmd WINEPREFIX="$WINEPREFIX" wine "$BITWIG_INSTALLER"
 fi
 
@@ -256,6 +209,68 @@ fi
 # WAYLAND LATENCY FIX
 ############################
 run_cmd gsettings set org.gnome.mutter experimental-features "[]"
+
+############################
+# SYSTEM TRAY PROFILE SWITCHER
+############################
+run_cmd mkdir -p "$HOME_DIR/bin"
+run_cmd tee "$HOME_DIR/bin/profile-switcher.py" > /dev/null <<'EOF'
+#!/usr/bin/env python3
+import sys, subprocess
+from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PyQt6.QtGui import QIcon
+
+HOME = "/home/" + subprocess.getoutput("whoami")
+
+def run_cmd(cmd):
+    subprocess.Popen(cmd, shell=True)
+
+app = QApplication(sys.argv)
+tray = QSystemTrayIcon()
+tray.setVisible(True)
+
+studio_icon = QIcon.fromTheme("computer")
+game_icon = QIcon.fromTheme("applications-games")
+
+current_profile = "Game"
+tray.setIcon(game_icon)
+
+menu = QMenu()
+
+studio_action = menu.addAction("Enable Studio Mode")
+studio_action.triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-daw.sh"), tray.setIcon(studio_icon)])
+
+vst_action = menu.addAction("VST Sync")
+vst_action.triggered.connect(lambda: run_cmd("yabridgectl sync"))
+
+menu.addSeparator()
+
+game_action = menu.addAction("Enable Game Mode")
+game_action.triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-game.sh"), tray.setIcon(game_icon)])
+
+menu.addSeparator()
+
+exit_action = menu.addAction("Exit")
+exit_action.triggered.connect(app.quit)
+
+tray.setContextMenu(menu)
+sys.exit(app.exec())
+EOF
+
+run_cmd chmod +x "$HOME_DIR/bin/profile-switcher.py"
+
+# Autostart entry
+run_cmd mkdir -p "$HOME_DIR/.config/autostart"
+run_cmd tee "$HOME_DIR/.config/autostart/profile-switcher.desktop" > /dev/null <<EOF
+[Desktop Entry]
+Type=Application
+Exec=$HOME_DIR/bin/profile-switcher.py
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Audio/Game Profile Switcher
+Comment=Switch between Studio and Game profiles
+EOF
 
 echo "==============================================="
 if [ "$DRY_RUN" = true ]; then
