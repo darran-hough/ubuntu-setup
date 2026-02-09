@@ -1,310 +1,320 @@
 #!/usr/bin/env bash
-set -e
+set -Eeuo pipefail
 
-# ===============================================
-# Ubuntu 24.04 Ultimate Audio + Gaming Setup
-# Fully unattended / non-interactive
-# Supports: --dryrun
-# ===============================================
+############################################################
+# Ubuntu 24.04 Ultimate Hybrid Audio + Gaming Setup
+############################################################
 
 DRY_RUN=false
-if [[ "$1" == "--dryrun" ]]; then
-    DRY_RUN=true
-    echo "=== Running in DRY-RUN mode ==="
-fi
+[[ "${1:-}" == "--dryrun" ]] && DRY_RUN=true
 
-run_cmd() {
-    if [ "$DRY_RUN" = true ]; then
-        echo "[DRY-RUN] $*"
-    else
-        eval "$@"
-    fi
-}
-
-USER_NAME=$(whoami)
-HOME_DIR="/home/$USER_NAME"
+USER_NAME="${SUDO_USER:-$USER}"
+HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
 WINEPREFIX="$HOME_DIR/.wine-yabridge"
 YABRIDGE_DIR="$HOME_DIR/.yabridge"
 
-echo "User: $USER_NAME"
-echo "Home Dir: $HOME_DIR"
-echo "Wine prefix: $WINEPREFIX"
-echo "Yabridge Dir: $YABRIDGE_DIR"
-echo "Dry-run mode: $DRY_RUN"
+log(){ echo -e "\e[1;32m[INFO]\e[0m $*"; }
+warn(){ echo -e "\e[1;33m[WARN]\e[0m $*"; }
 
-############################
-# SYSTEM UPDATE & PACKAGES
-############################
-run_cmd sudo apt update
-run_cmd sudo apt upgrade -y
+run(){
+    if $DRY_RUN; then
+        echo "[DRYRUN] $*"
+    else
+        "$@"
+    fi
+}
 
-run_cmd sudo apt install -y --no-install-recommends \
-    linux-lowlatency linux-headers-lowlatency \
-    pipewire pipewire-jack wireplumber alsa-utils rtkit gamemode \
-    winetricks fonts-wine cabextract unzip wget gnupg2 software-properties-common \
-    python3-pyqt6 python3-pyqt6.qtsvg python3-pip
+apt_install(){
+    run sudo apt-get install -y --no-install-recommends "$@"
+}
 
-############################
-# PIPEWIRE ENABLE
-############################
-run_cmd systemctl --user enable pipewire pipewire-pulse wireplumber --now
+############################################################
+# SYSTEM UPDATE
+############################################################
 
-############################
-# REALTIME PERMISSIONS
-############################
-run_cmd sudo tee /etc/security/limits.d/audio.conf > /dev/null <<EOF
-@audio   -  rtprio     95
-@audio   -  memlock    unlimited
-@audio   -  nice      -19
+log "Updating system"
+run sudo apt-get update
+run sudo apt-get dist-upgrade -y
+
+############################################################
+# LOW LATENCY KERNEL
+############################################################
+
+if ! dpkg -s linux-lowlatency &>/dev/null; then
+    apt_install linux-lowlatency linux-headers-lowlatency
+fi
+
+############################################################
+# CORE PACKAGES
+############################################################
+
+apt_install \
+pipewire pipewire-jack wireplumber \
+alsa-utils rtkit gamemode \
+winetricks cabextract unzip wget gnupg jq curl \
+python3-pyqt6 python3-pip \
+gamescope mangohud vkbasalt latencytop \
+rtirq-init \
+linux-tools-common linux-tools-$(uname -r)
+
+run systemctl --user enable pipewire pipewire-pulse wireplumber --now
+
+############################################################
+# REALTIME AUDIO PERMISSIONS
+############################################################
+
+run sudo install -Dm644 /dev/stdin /etc/security/limits.d/audio.conf <<EOF
+@audio - rtprio 95
+@audio - memlock unlimited
+@audio - nice -19
 EOF
 
-run_cmd sudo usermod -aG audio "$USER_NAME"
+run sudo usermod -aG audio "$USER_NAME"
 
-############################
+############################################################
 # PIPEWIRE LOW LATENCY
-############################
-run_cmd mkdir -p "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
-run_cmd tee "$HOME_DIR/.config/wireplumber/wireplumber.conf.d/99-low-latency.conf" > /dev/null <<EOF
+############################################################
+
+mkdir -p "$HOME_DIR/.config/pipewire/pipewire.conf.d"
+
+cat > "$HOME_DIR/.config/pipewire/pipewire.conf.d/99-lowlatency.conf" <<EOF
 context.properties = {
-    default.clock.rate        = 48000
-    default.clock.quantum     = 64
-    default.clock.min-quantum = 32
-    default.clock.max-quantum = 256
+ default.clock.rate = 48000
+ default.clock.quantum = 64
+ default.clock.min-quantum = 32
+ default.clock.max-quantum = 256
+ realtime.priority = 88
 }
 EOF
 
-run_cmd mkdir -p "$HOME_DIR/.config/pipewire/pipewire.conf.d"
-run_cmd tee "$HOME_DIR/.config/pipewire/pipewire.conf.d/99-rt.conf" > /dev/null <<EOF
-context.properties = {
-    realtime.priority = 88
-}
+############################################################
+# AMD CPU + USB AUDIO LATENCY
+############################################################
+
+sudo tee /etc/modprobe.d/amd-usb-audio.conf > /dev/null <<EOF
+options snd_usb_audio nrpacks=1
 EOF
 
-############################
-# NVIDIA WAYLAND
-############################
-run_cmd sudo tee /etc/modprobe.d/nvidia-drm.conf > /dev/null <<EOF
+############################################################
+# NVIDIA PERFORMANCE + WAYLAND
+############################################################
+
+sudo tee /etc/modprobe.d/nvidia-performance.conf > /dev/null <<EOF
+options nvidia NVreg_PreserveVideoMemoryAllocations=1
+options nvidia NVreg_RegistryDwords="PerfLevelSrc=0x2222"
+EOF
+
+sudo tee /etc/modprobe.d/nvidia-drm.conf > /dev/null <<EOF
 options nvidia-drm modeset=1
 EOF
-run_cmd sudo update-initramfs -u || true
 
-############################
-# FOCUSRITE IRQ PINNING
-############################
-run_cmd sudo tee /usr/local/bin/focusrite-irq.sh > /dev/null <<EOF
-#!/bin/bash
-MASK=0c
-for IRQ in \$(grep -i snd_usb_audio /proc/interrupts | awk '{print \$1}' | tr -d ':'); do
-    echo \$MASK > /proc/irq/\$IRQ/smp_affinity
-done
-EOF
-run_cmd sudo chmod +x /usr/local/bin/focusrite-irq.sh
+run sudo update-initramfs -u || true
 
-run_cmd sudo tee /etc/systemd/system/focusrite-irq.service > /dev/null <<EOF
-[Unit]
-Description=Pin Focusrite USB IRQs
-After=multi-user.target
+############################################################
+# RTIRQ PRIORITY
+############################################################
 
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/focusrite-irq.sh
-
-[Install]
-WantedBy=multi-user.target
-EOF
-run_cmd sudo systemctl enable focusrite-irq.service || true
-
-############################
-# DISABLE USB AUTOSUSPEND
-############################
-run_cmd sudo tee /etc/udev/rules.d/99-usb-focusrite-nosuspend.rules > /dev/null <<EOF
-ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1235", TEST=="power/control", ATTR{power/control}="on"
+sudo tee /etc/default/rtirq > /dev/null <<EOF
+RTIRQ_NAME_LIST="snd usb nvidia"
+RTIRQ_PRIO_HIGH=90
+RTIRQ_PRIO_LOW=60
 EOF
 
-############################
-# PIPEWIRE PROFILES
-############################
-run_cmd mkdir -p "$HOME_DIR/.local/bin"
+run sudo systemctl enable rtirq || true
 
-# Studio
-run_cmd tee "$HOME_DIR/.local/bin/pw-daw.sh" > /dev/null <<EOF
-#!/bin/bash
+############################################################
+# MANGOHUD CONFIG
+############################################################
+
+mkdir -p "$HOME_DIR/.config/MangoHud"
+
+cat > "$HOME_DIR/.config/MangoHud/MangoHud.conf" <<EOF
+fps
+frametime
+cpu_stats
+gpu_stats
+ram
+vram
+EOF
+
+############################################################
+# VKBASALT CONFIG
+############################################################
+
+mkdir -p "$HOME_DIR/.config/vkBasalt"
+
+cat > "$HOME_DIR/.config/vkBasalt/vkBasalt.conf" <<EOF
+effects = cas
+casSharpness = 0.5
+EOF
+
+############################################################
+# PIPEWIRE PROFILE SCRIPTS
+############################################################
+
+mkdir -p "$HOME_DIR/.local/bin"
+
+cat > "$HOME_DIR/.local/bin/pw-daw.sh" <<EOF
+#!/usr/bin/env bash
 pw-metadata -n settings 0 clock.force-rate 48000
 pw-metadata -n settings 0 clock.force-quantum 64
 EOF
 
-# Game
-run_cmd tee "$HOME_DIR/.local/bin/pw-game.sh" > /dev/null <<EOF
-#!/bin/bash
+cat > "$HOME_DIR/.local/bin/pw-game.sh" <<EOF
+#!/usr/bin/env bash
 pw-metadata -n settings 0 clock.force-rate 48000
 pw-metadata -n settings 0 clock.force-quantum 256
 EOF
 
-run_cmd chmod +x "$HOME_DIR/.local/bin"/pw-*.sh
+############################################################
+# CPU GOVERNOR SCRIPTS
+############################################################
 
-############################
-# WINEHQ + DXVK + YABRIDGE
-############################
-run_cmd sudo dpkg --add-architecture i386
-run_cmd wget -O- https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor --yes --output /usr/share/keyrings/winehq-archive.key
-run_cmd sudo tee /etc/apt/sources.list.d/winehq.list > /dev/null <<EOF
-deb [signed-by=/usr/share/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/ubuntu/ noble main
-EOF
-run_cmd sudo apt update
-run_cmd sudo apt install --install-recommends -y winehq-stable
-
-run_cmd mkdir -p "$WINEPREFIX"
-run_cmd export WINEPREFIX="$WINEPREFIX"
-run_cmd export WINEARCH=win64
-run_cmd wineboot --init
-
-run_cmd winetricks -q corefonts
-run_cmd winetricks --force -q vcrun2019
-run_cmd winetricks -q dxvk
-
-############################
-# YABRIDGE INSTALL
-############################
-run_cmd mkdir -p "$YABRIDGE_DIR"
-
-YAB_JSON=$(mktemp)
-run_cmd wget -qO "$YAB_JSON" "https://api.github.com/repos/robbert-vdh/yabridge/releases/latest"
-YAB_URL=$(grep "browser_download_url" "$YAB_JSON" | grep -E "linux.tar.gz|ubuntu-20.04.tar.gz" | head -n1 | cut -d '"' -f4)
-rm -f "$YAB_JSON"
-
-if [ -n "$YAB_URL" ]; then
-    run_cmd wget -O "$YABRIDGE_DIR/yabridge.tar.gz" "$YAB_URL"
-    run_cmd tar -xzf "$YABRIDGE_DIR/yabridge.tar.gz" -C "$YABRIDGE_DIR"
-else
-    echo "[WARN] Could not find a yabridge Linux release asset."
-    echo "[WARN] You may need to install yabridge manually: https://github.com/robbert-vdh/yabridge/releases"
-fi
-
-PROFILE_FILE="$HOME_DIR/.profile"
-if ! grep -q 'export PATH="$HOME/.yabridge:$PATH"' "$PROFILE_FILE"; then
-    run_cmd echo 'export PATH="$HOME/.yabridge:$PATH"' >> "$PROFILE_FILE"
-fi
-export PATH="$HOME_DIR/.yabridge:$PATH"
-
-if command -v yabridgectl >/dev/null 2>&1; then
-    run_cmd mkdir -p "$WINEPREFIX/drive_c/VST2" "$WINEPREFIX/drive_c/VST3" "$HOME_DIR/.vst" "$HOME_DIR/.vst3"
-    run_cmd yabridgectl set --wine-prefix="$WINEPREFIX" --path="$WINEPREFIX/drive_c/VST2" --path="$WINEPREFIX/drive_c/VST3"
-    run_cmd yabridgectl sync
-else
-    echo "[WARN] yabridgectl not installed or not found in PATH."
-fi
-
-############################
-# BITWIG INSTALLER CHECK + INSTALL (.deb)
-############################
-# Enable 32-bit architecture
-run_cmd sudo dpkg --add-architecture i386
-run_cmd sudo apt update
-
-# Install only available dependencies
-BITWIG_DEPS="libxcb-icccm4:i386 libxcb-util1:i386 libxcb-xinput0:i386 libxkbcommon-x11-0:i386 libxcb-ewmh2"
-
-echo "[INFO] Installing available dependencies for Bitwig..."
-for pkg in $BITWIG_DEPS; do
-    if apt-cache show "$pkg" >/dev/null 2>&1; then
-        run_cmd sudo apt install -y "$pkg"
-    else
-        echo "[WARN] Package $pkg not found in repositories, skipping..."
-    fi
+cat > "$HOME_DIR/.local/bin/performance-mode.sh" <<'EOF'
+#!/usr/bin/env bash
+sudo cpupower frequency-set -g performance
+for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+ echo performance | sudo tee "$f" >/dev/null 2>&1 || true
 done
+EOF
 
-BITWIG_INSTALLER=$(ls -t $HOME_DIR/Downloads/Bitwig_Studio_*.deb 2>/dev/null | head -n 1 || true)
+cat > "$HOME_DIR/.local/bin/studio-mode.sh" <<'EOF'
+#!/usr/bin/env bash
+sudo cpupower frequency-set -g schedutil
+for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
+ echo balance_performance | sudo tee "$f" >/dev/null 2>&1 || true
+done
+~/.local/bin/pw-daw.sh
+EOF
 
-if [ -z "$BITWIG_INSTALLER" ]; then
-    echo "[WARN] No Bitwig .deb installer found in ~/Downloads"
-    echo "[INFO] Please download Bitwig Studio .deb installer and place it in ~/Downloads before running the script."
-else
-    echo "[INFO] Found Bitwig installer: $BITWIG_INSTALLER"
-    if [ "$DRY_RUN" = true ]; then
-        echo "[DRY-RUN] Would run: sudo dpkg -i \"$BITWIG_INSTALLER\" && sudo apt --fix-broken install -y"
-    else
-        echo "[INFO] Installing Bitwig..."
-        sudo dpkg -i "$BITWIG_INSTALLER" || true
-        echo "[INFO] Fixing broken packages..."
-        sudo apt --fix-broken install -y
-        echo "[INFO] Bitwig installation complete."
-    fi
+chmod +x "$HOME_DIR/.local/bin/"*.sh
+
+############################################################
+# GAMESCOPE WRAPPER
+############################################################
+
+cat > "$HOME_DIR/.local/bin/gamescope-launch.sh" <<'EOF'
+#!/usr/bin/env bash
+
+~/.local/bin/performance-mode.sh
+
+export MANGOHUD=1
+export ENABLE_VKBASALT=1
+export __GL_SYNC_TO_VBLANK=0
+export __GL_GSYNC_ALLOWED=1
+export __GL_VRR_ALLOWED=1
+
+exec gamescope -f -r 144 --adaptive-sync -- "$@"
+EOF
+
+chmod +x "$HOME_DIR/.local/bin/gamescope-launch.sh"
+
+############################################################
+# WINEHQ INSTALL
+############################################################
+
+if ! command -v wine &>/dev/null; then
+
+run sudo dpkg --add-architecture i386
+sudo mkdir -pm755 /etc/apt/keyrings
+
+curl -fsSL https://dl.winehq.org/wine-builds/winehq.key \
+ | sudo gpg --dearmor -o /etc/apt/keyrings/winehq.gpg
+
+echo "deb [signed-by=/etc/apt/keyrings/winehq.gpg] https://dl.winehq.org/wine-builds/ubuntu noble main" \
+ | sudo tee /etc/apt/sources.list.d/winehq.list
+
+run sudo apt update
+apt_install winehq-stable
+
 fi
 
-############################
-# SYSTEM TRAY PROFILE SWITCHER
-############################
-run_cmd mkdir -p "$HOME_DIR/bin"
-run_cmd tee "$HOME_DIR/bin/profile-switcher.py" > /dev/null <<'EOF'
+############################################################
+# WINE PREFIX + WINETRICKS
+############################################################
+
+if [[ ! -d "$WINEPREFIX" ]]; then
+WINEPREFIX="$WINEPREFIX" WINEARCH=win64 wineboot
+fi
+
+WINEPREFIX="$WINEPREFIX" winetricks -q corefonts vcrun2019 dxvk
+
+############################################################
+# YABRIDGE INSTALL
+############################################################
+
+mkdir -p "$YABRIDGE_DIR"
+
+LATEST_URL=$(curl -s https://api.github.com/repos/robbert-vdh/yabridge/releases/latest \
+ | jq -r '.assets[] | select(.name|test("linux.*tar.gz")) | .browser_download_url' | head -n1)
+
+if [[ -n "$LATEST_URL" ]]; then
+wget -O "$YABRIDGE_DIR/yabridge.tar.gz" "$LATEST_URL"
+tar -xzf "$YABRIDGE_DIR/yabridge.tar.gz" -C "$YABRIDGE_DIR"
+fi
+
+export PATH="$YABRIDGE_DIR:$PATH"
+
+if command -v yabridgectl &>/dev/null; then
+mkdir -p "$HOME_DIR/.vst" "$HOME_DIR/.vst3"
+yabridgectl set --wine-prefix="$WINEPREFIX"
+yabridgectl sync
+fi
+
+############################################################
+# BITWIG AUTO INSTALL
+############################################################
+
+BITWIG_DEB=$(ls -t "$HOME_DIR"/Downloads/Bitwig_Studio_*.deb 2>/dev/null | head -n1 || true)
+
+if [[ -n "$BITWIG_DEB" ]]; then
+run sudo dpkg -i "$BITWIG_DEB" || true
+run sudo apt -f install -y
+fi
+
+############################################################
+# PROFILE SWITCHER TRAY
+############################################################
+
+mkdir -p "$HOME_DIR/bin"
+
+cat > "$HOME_DIR/bin/profile-switcher.py" <<'EOF'
 #!/usr/bin/env python3
-import sys, subprocess
+import subprocess, sys
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PyQt6.QtGui import QIcon
 
-HOME = "/home/" + subprocess.getoutput("whoami")
-def run_cmd(cmd): subprocess.Popen(cmd, shell=True)
+HOME = subprocess.getoutput("echo $HOME")
 
-def check_yabridge():
-    try:
-        subprocess.check_output(["yabridgectl", "status"])
-        return "yabridge: OK"
-    except Exception:
-        return "yabridge: Not found"
+def run(cmd): subprocess.Popen(cmd, shell=True)
 
 app = QApplication(sys.argv)
-tray = QSystemTrayIcon()
+tray = QSystemTrayIcon(QIcon.fromTheme("audio-card"))
 tray.setVisible(True)
-tray.setToolTip(check_yabridge())
-
-studio_icon = QIcon.fromTheme("computer")
-game_icon = QIcon.fromTheme("applications-games")
-
-tray.setIcon(game_icon)
 
 menu = QMenu()
-menu.addAction("Enable Studio Mode").triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-daw.sh"), tray.setIcon(studio_icon)])
-menu.addAction("VST Sync").triggered.connect(lambda: run_cmd("yabridgectl sync"))
-menu.addSeparator()
-menu.addAction("Enable Game Mode").triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-game.sh"), tray.setIcon(game_icon)])
+menu.addAction("Studio Mode").triggered.connect(lambda: run(f"{HOME}/.local/bin/studio-mode.sh"))
+menu.addAction("Game Mode").triggered.connect(lambda: run(f"{HOME}/.local/bin/performance-mode.sh"))
+menu.addAction("VST Sync").triggered.connect(lambda: run("yabridgectl sync"))
 
 tray.setContextMenu(menu)
 sys.exit(app.exec())
 EOF
 
-run_cmd chmod +x "$HOME_DIR/bin/profile-switcher.py"
+chmod +x "$HOME_DIR/bin/profile-switcher.py"
 
-run_cmd mkdir -p "$HOME_DIR/.config/autostart"
-run_cmd tee "$HOME_DIR/.config/autostart/profile-switcher.desktop" > /dev/null <<EOF
+mkdir -p "$HOME_DIR/.config/autostart"
+
+cat > "$HOME_DIR/.config/autostart/profile-switcher.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Exec=$HOME_DIR/bin/profile-switcher.py
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
 Name=Audio/Game Profile Switcher
-Comment=Switch between Studio and Game profiles
 EOF
 
-############################
-# FINAL SUMMARY
-#############################
-echo "==============================================="
-if [ "$DRY_RUN" = true ]; then
-    echo "DRY-RUN COMPLETE: no changes were made."
-    echo "Run './ubuntu-audio-gaming-ultimate.sh' without --dryrun to execute."
-else
-    echo "SETUP COMPLETE!"
-    echo "All audio and gaming optimizations have been applied."
-    echo "PipeWire, Wine, yabridge, NVIDIA, Focusrite, and Steam are ready."
-    echo "System tray profile switcher installed at: $HOME_DIR/bin/profile-switcher.py"
-    if command -v yabridgectl >/dev/null 2>&1; then
-        YAB_VERSION=$(yabridgectl --version 2>/dev/null || echo "Unknown")
-        echo "Yabridge installed at: $YABRIDGE_DIR"
-        echo "Yabridge version: $YAB_VERSION"
-    else
-        echo "[WARN] yabridgectl not installed or not found in PATH."
-    fi
-    echo
-    echo "IMPORTANT: Please REBOOT your system for all changes to take effect."
-fi
-echo "==============================================="
+############################################################
+# DONE
+############################################################
+
+log "Setup Complete!"
+log "Reboot recommended."
