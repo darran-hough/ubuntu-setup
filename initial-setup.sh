@@ -243,6 +243,23 @@ run_cmd yabridgectl set \
   --path="$WINEPREFIX/drive_c/VST3"
 run_cmd yabridgectl sync
 
+
+############################
+# BITWIG INSTALLER
+############################
+BITWIG_INSTALLER=$(ls -t $HOME_DIR/Downloads/Bitwig_Studio_* | head -n 1 || true)
+
+if [ -z "$BITWIG_INSTALLER" ]; then
+    echo "[INFO] No Bitwig installer found in ~/Downloads. Skipping installation."
+else
+    echo "[INFO] Found Bitwig installer: $BITWIG_INSTALLER"
+    run_cmd chmod +x "$BITWIG_INSTALLER"
+    echo "[INFO] Launching Bitwig installer in Wine prefix..."
+    run_cmd WINEPREFIX="$WINEPREFIX" wine "$BITWIG_INSTALLER"
+fi
+
+
+
 ############################
 # WAYLAND LATENCY FIX
 ############################
