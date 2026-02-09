@@ -248,8 +248,7 @@ menu.addAction("Enable Studio Mode").triggered.connect(lambda: [run_cmd(f"{HOME}
 menu.addAction("VST Sync").triggered.connect(lambda: run_cmd("yabridgectl sync"))
 menu.addSeparator()
 menu.addAction("Enable Game Mode").triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-game.sh"), tray.setIcon(game_icon)])
-menu.addSeparator()
-menu.addAction("Exit").triggered.connect(app.quit)
+
 
 tray.setContextMenu(menu)
 sys.exit(app.exec())
