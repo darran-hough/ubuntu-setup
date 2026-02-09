@@ -1,320 +1,258 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
+#!/bin/bash
+set -e
 
-############################################################
-# Ubuntu 24.04 Ultimate Hybrid Audio + Gaming Setup
-############################################################
+########################################
+# Unified Studio/Game Mode Switcher
+# Auto-installs everything, no prompts
+########################################
 
-DRY_RUN=false
-[[ "${1:-}" == "--dryrun" ]] && DRY_RUN=true
+USER_NAME=$(whoami)
+HOME_DIR="$HOME"
+SCRIPT_DIR="$HOME_DIR"
 
-USER_NAME="${SUDO_USER:-$USER}"
-HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
-WINEPREFIX="$HOME_DIR/.wine-yabridge"
-YABRIDGE_DIR="$HOME_DIR/.yabridge"
+MODE_SWITCHER="$SCRIPT_DIR/mode-switcher.sh"
+TRAY_APP="$SCRIPT_DIR/mode-tray.py"
+AUTOSTART_DIR="$HOME_DIR/.config/autostart"
+AUTOSTART_FILE="$AUTOSTART_DIR/mode-tray.desktop"
 
-log(){ echo -e "\e[1;32m[INFO]\e[0m $*"; }
-warn(){ echo -e "\e[1;33m[WARN]\e[0m $*"; }
+YABRIDGE_VERSION="5.1.0"
+YABRIDGE_URL="https://github.com/robbert-vdh/yabridge/releases/download/${YABRIDGE_VERSION}/yabridge-${YABRIDGE_VERSION}.tar.gz"
+YABRIDGE_BIN="$HOME_DIR/.local/share/yabridge/yabridgectl"
 
-run(){
-    if $DRY_RUN; then
-        echo "[DRYRUN] $*"
-    else
-        "$@"
-    fi
+########################################
+# Helpers
+########################################
+function require_sudo() {
+  if ! command -v sudo >/dev/null; then
+    echo "❌ sudo is required."
+    exit 1
+  fi
 }
 
-apt_install(){
-    run sudo apt-get install -y --no-install-recommends "$@"
+function ensure_dir() {
+  mkdir -p "$1"
 }
 
-############################################################
-# SYSTEM UPDATE
-############################################################
+########################################
+# Mode Switcher script
+########################################
+function write_mode_switcher() {
+cat > "$MODE_SWITCHER" <<'EOF'
+#!/bin/bash
+set -e
 
-log "Updating system"
-run sudo apt-get update
-run sudo apt-get dist-upgrade -y
+MODE="$1"
 
-############################################################
-# LOW LATENCY KERNEL
-############################################################
-
-if ! dpkg -s linux-lowlatency &>/dev/null; then
-    apt_install linux-lowlatency linux-headers-lowlatency
+if [[ "$MODE" != "audio" && "$MODE" != "gaming" ]]; then
+  echo "Usage: $0 [audio|gaming]"
+  exit 1
 fi
 
-############################################################
-# CORE PACKAGES
-############################################################
+AUDIO_LIMITS_FILE="/etc/security/limits.d/audio.conf"
 
-apt_install \
-pipewire pipewire-jack wireplumber \
-alsa-utils rtkit gamemode \
-winetricks cabextract unzip wget gnupg jq curl \
-python3-pyqt6 python3-pip \
-gamescope mangohud vkbasalt latencytop \
-rtirq-init \
-linux-tools-common linux-tools-$(uname -r)
+if [[ "$MODE" == "audio" ]]; then
+  echo "🎧 Switching to AUDIO mode..."
+  sudo tee "$AUDIO_LIMITS_FILE" >/dev/null <<EOF2
+@audio   -  rtprio     95
+@audio   -  memlock    unlimited
+@audio   -  nice      -19
+EOF2
 
-run systemctl --user enable pipewire pipewire-pulse wireplumber --now
+  echo "🔧 Enabling TLP..."
+  sudo systemctl enable tlp || true
+  sudo systemctl restart tlp || true
 
-############################################################
-# REALTIME AUDIO PERMISSIONS
-############################################################
+  echo "✅ AUDIO mode enabled."
+  exit 0
+fi
 
-run sudo install -Dm644 /dev/stdin /etc/security/limits.d/audio.conf <<EOF
-@audio - rtprio 95
-@audio - memlock unlimited
-@audio - nice -19
+if [[ "$MODE" == "gaming" ]]; then
+  echo "🎮 Switching to GAMING mode..."
+  sudo rm -f "$AUDIO_LIMITS_FILE"
+
+  echo "🔧 Disabling TLP..."
+  sudo systemctl stop tlp || true
+  sudo systemctl disable tlp || true
+
+  echo "✅ GAMING mode enabled."
+  exit 0
+fi
 EOF
 
-run sudo usermod -aG audio "$USER_NAME"
-
-############################################################
-# PIPEWIRE LOW LATENCY
-############################################################
-
-mkdir -p "$HOME_DIR/.config/pipewire/pipewire.conf.d"
-
-cat > "$HOME_DIR/.config/pipewire/pipewire.conf.d/99-lowlatency.conf" <<EOF
-context.properties = {
- default.clock.rate = 48000
- default.clock.quantum = 64
- default.clock.min-quantum = 32
- default.clock.max-quantum = 256
- realtime.priority = 88
+chmod +x "$MODE_SWITCHER"
 }
-EOF
 
-############################################################
-# AMD CPU + USB AUDIO LATENCY
-############################################################
-
-sudo tee /etc/modprobe.d/amd-usb-audio.conf > /dev/null <<EOF
-options snd_usb_audio nrpacks=1
-EOF
-
-############################################################
-# NVIDIA PERFORMANCE + WAYLAND
-############################################################
-
-sudo tee /etc/modprobe.d/nvidia-performance.conf > /dev/null <<EOF
-options nvidia NVreg_PreserveVideoMemoryAllocations=1
-options nvidia NVreg_RegistryDwords="PerfLevelSrc=0x2222"
-EOF
-
-sudo tee /etc/modprobe.d/nvidia-drm.conf > /dev/null <<EOF
-options nvidia-drm modeset=1
-EOF
-
-run sudo update-initramfs -u || true
-
-############################################################
-# RTIRQ PRIORITY
-############################################################
-
-sudo tee /etc/default/rtirq > /dev/null <<EOF
-RTIRQ_NAME_LIST="snd usb nvidia"
-RTIRQ_PRIO_HIGH=90
-RTIRQ_PRIO_LOW=60
-EOF
-
-run sudo systemctl enable rtirq || true
-
-############################################################
-# MANGOHUD CONFIG
-############################################################
-
-mkdir -p "$HOME_DIR/.config/MangoHud"
-
-cat > "$HOME_DIR/.config/MangoHud/MangoHud.conf" <<EOF
-fps
-frametime
-cpu_stats
-gpu_stats
-ram
-vram
-EOF
-
-############################################################
-# VKBASALT CONFIG
-############################################################
-
-mkdir -p "$HOME_DIR/.config/vkBasalt"
-
-cat > "$HOME_DIR/.config/vkBasalt/vkBasalt.conf" <<EOF
-effects = cas
-casSharpness = 0.5
-EOF
-
-############################################################
-# PIPEWIRE PROFILE SCRIPTS
-############################################################
-
-mkdir -p "$HOME_DIR/.local/bin"
-
-cat > "$HOME_DIR/.local/bin/pw-daw.sh" <<EOF
-#!/usr/bin/env bash
-pw-metadata -n settings 0 clock.force-rate 48000
-pw-metadata -n settings 0 clock.force-quantum 64
-EOF
-
-cat > "$HOME_DIR/.local/bin/pw-game.sh" <<EOF
-#!/usr/bin/env bash
-pw-metadata -n settings 0 clock.force-rate 48000
-pw-metadata -n settings 0 clock.force-quantum 256
-EOF
-
-############################################################
-# CPU GOVERNOR SCRIPTS
-############################################################
-
-cat > "$HOME_DIR/.local/bin/performance-mode.sh" <<'EOF'
-#!/usr/bin/env bash
-sudo cpupower frequency-set -g performance
-for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
- echo performance | sudo tee "$f" >/dev/null 2>&1 || true
-done
-EOF
-
-cat > "$HOME_DIR/.local/bin/studio-mode.sh" <<'EOF'
-#!/usr/bin/env bash
-sudo cpupower frequency-set -g schedutil
-for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do
- echo balance_performance | sudo tee "$f" >/dev/null 2>&1 || true
-done
-~/.local/bin/pw-daw.sh
-EOF
-
-chmod +x "$HOME_DIR/.local/bin/"*.sh
-
-############################################################
-# GAMESCOPE WRAPPER
-############################################################
-
-cat > "$HOME_DIR/.local/bin/gamescope-launch.sh" <<'EOF'
-#!/usr/bin/env bash
-
-~/.local/bin/performance-mode.sh
-
-export MANGOHUD=1
-export ENABLE_VKBASALT=1
-export __GL_SYNC_TO_VBLANK=0
-export __GL_GSYNC_ALLOWED=1
-export __GL_VRR_ALLOWED=1
-
-exec gamescope -f -r 144 --adaptive-sync -- "$@"
-EOF
-
-chmod +x "$HOME_DIR/.local/bin/gamescope-launch.sh"
-
-############################################################
-# WINEHQ INSTALL
-############################################################
-
-if ! command -v wine &>/dev/null; then
-
-run sudo dpkg --add-architecture i386
-sudo mkdir -pm755 /etc/apt/keyrings
-
-curl -fsSL https://dl.winehq.org/wine-builds/winehq.key \
- | sudo gpg --dearmor -o /etc/apt/keyrings/winehq.gpg
-
-echo "deb [signed-by=/etc/apt/keyrings/winehq.gpg] https://dl.winehq.org/wine-builds/ubuntu noble main" \
- | sudo tee /etc/apt/sources.list.d/winehq.list
-
-run sudo apt update
-apt_install winehq-stable
-
-fi
-
-############################################################
-# WINE PREFIX + WINETRICKS
-############################################################
-
-if [[ ! -d "$WINEPREFIX" ]]; then
-WINEPREFIX="$WINEPREFIX" WINEARCH=win64 wineboot
-fi
-
-WINEPREFIX="$WINEPREFIX" winetricks -q corefonts vcrun2019 dxvk
-
-############################################################
-# YABRIDGE INSTALL
-############################################################
-
-mkdir -p "$YABRIDGE_DIR"
-
-LATEST_URL=$(curl -s https://api.github.com/repos/robbert-vdh/yabridge/releases/latest \
- | jq -r '.assets[] | select(.name|test("linux.*tar.gz")) | .browser_download_url' | head -n1)
-
-if [[ -n "$LATEST_URL" ]]; then
-wget -O "$YABRIDGE_DIR/yabridge.tar.gz" "$LATEST_URL"
-tar -xzf "$YABRIDGE_DIR/yabridge.tar.gz" -C "$YABRIDGE_DIR"
-fi
-
-export PATH="$YABRIDGE_DIR:$PATH"
-
-if command -v yabridgectl &>/dev/null; then
-mkdir -p "$HOME_DIR/.vst" "$HOME_DIR/.vst3"
-yabridgectl set --wine-prefix="$WINEPREFIX"
-yabridgectl sync
-fi
-
-############################################################
-# BITWIG AUTO INSTALL
-############################################################
-
-BITWIG_DEB=$(ls -t "$HOME_DIR"/Downloads/Bitwig_Studio_*.deb 2>/dev/null | head -n1 || true)
-
-if [[ -n "$BITWIG_DEB" ]]; then
-run sudo dpkg -i "$BITWIG_DEB" || true
-run sudo apt -f install -y
-fi
-
-############################################################
-# PROFILE SWITCHER TRAY
-############################################################
-
-mkdir -p "$HOME_DIR/bin"
-
-cat > "$HOME_DIR/bin/profile-switcher.py" <<'EOF'
+########################################
+# Tray app
+########################################
+function write_tray_app() {
+cat > "$TRAY_APP" <<'EOF'
 #!/usr/bin/env python3
-import subprocess, sys
-from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PyQt6.QtGui import QIcon
 
-HOME = subprocess.getoutput("echo $HOME")
+import os
+import sys
+import subprocess
+from pathlib import Path
+from PyQt6 import QtWidgets, QtGui
 
-def run(cmd): subprocess.Popen(cmd, shell=True)
+HOME = str(Path.home())
+MODE_SWITCHER = os.path.join(HOME, "mode-switcher.sh")
+YABRIDGECTL = os.path.join(HOME, ".local/share/yabridge/yabridgectl")
 
-app = QApplication(sys.argv)
-tray = QSystemTrayIcon(QIcon.fromTheme("audio-card"))
-tray.setVisible(True)
+def run_cmd(cmd):
+    return subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-menu = QMenu()
-menu.addAction("Studio Mode").triggered.connect(lambda: run(f"{HOME}/.local/bin/studio-mode.sh"))
-menu.addAction("Game Mode").triggered.connect(lambda: run(f"{HOME}/.local/bin/performance-mode.sh"))
-menu.addAction("VST Sync").triggered.connect(lambda: run("yabridgectl sync"))
+def set_mode(mode):
+    if mode not in ["audio", "gaming"]:
+        return False
+    run_cmd(f"bash {MODE_SWITCHER} {mode}")
+    return True
 
-tray.setContextMenu(menu)
-sys.exit(app.exec())
+def sync_vst():
+    run_cmd(f"{YABRIDGECTL} sync")
+
+def get_current_mode():
+    limits_file = "/etc/security/limits.d/audio.conf"
+    return "audio" if os.path.exists(limits_file) else "gaming"
+
+class TrayApp(QtWidgets.QSystemTrayIcon):
+    def __init__(self):
+        super().__init__()
+
+        self.menu = QtWidgets.QMenu()
+
+        studio_menu = QtWidgets.QMenu("Studio", self.menu)
+        studio_mode_action = studio_menu.addAction("Enable Studio Mode")
+        vst_sync_action = studio_menu.addAction("VST Sync")
+
+        self.menu.addMenu(studio_menu)
+        self.menu.addSeparator()
+        game_mode_action = self.menu.addAction("Enable Game Mode")
+        self.menu.addSeparator()
+        quit_action = self.menu.addAction("Quit")
+
+        studio_mode_action.triggered.connect(self.enable_studio)
+        vst_sync_action.triggered.connect(self.vst_sync)
+        game_mode_action.triggered.connect(self.enable_game)
+        quit_action.triggered.connect(QtWidgets.QApplication.quit)
+
+        self.setContextMenu(self.menu)
+
+        # Use default icons
+        self.audio_icon = QtGui.QIcon.fromTheme("media-playback-start")
+        self.game_icon = QtGui.QIcon.fromTheme("applications-games")
+
+        self.update_icon()
+
+    def update_icon(self):
+        mode = get_current_mode()
+        if mode == "audio":
+            self.setIcon(self.audio_icon)
+            self.setToolTip("Studio Mode")
+        else:
+            self.setIcon(self.game_icon)
+            self.setToolTip("Game Mode")
+
+    def enable_studio(self):
+        set_mode("audio")
+        self.update_icon()
+
+    def vst_sync(self):
+        sync_vst()
+        self.update_icon()
+
+    def enable_game(self):
+        set_mode("gaming")
+        self.update_icon()
+
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+    tray = TrayApp()
+    tray.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
 EOF
 
-chmod +x "$HOME_DIR/bin/profile-switcher.py"
+chmod +x "$TRAY_APP"
+}
 
-mkdir -p "$HOME_DIR/.config/autostart"
+########################################
+# Autostart file
+########################################
+function write_autostart() {
+  ensure_dir "$AUTOSTART_DIR"
 
-cat > "$HOME_DIR/.config/autostart/profile-switcher.desktop" <<EOF
+cat > "$AUTOSTART_FILE" <<EOF
 [Desktop Entry]
 Type=Application
-Exec=$HOME_DIR/bin/profile-switcher.py
-Name=Audio/Game Profile Switcher
+Name=Studio/Game Mode Switcher
+Exec=/usr/bin/python3 $TRAY_APP
+X-GNOME-Autostart-enabled=true
 EOF
+}
 
-############################################################
-# DONE
-############################################################
+########################################
+# Install everything (run once)
+########################################
+function install_all() {
+  require_sudo
 
-log "Setup Complete!"
-log "Reboot recommended."
+  echo "🔄 Updating system..."
+  sudo apt update
+  sudo apt upgrade -y
+  sudo apt autoremove -y
+  sudo apt clean
+
+  echo "🧠 Installing low-latency kernel..."
+  sudo apt install -y linux-lowlatency
+
+  echo "⚡ Installing CPU tools..."
+  sudo apt install -y cpufrequtils tlp
+
+  echo "🎚️ Installing PipeWire audio tools..."
+  sudo apt install -y pipewire-jack qpwgraph pavucontrol
+
+  echo "🍷 Installing Wine..."
+  sudo dpkg --add-architecture i386
+  sudo apt update
+  sudo apt install -y wine64 wine32 winetricks
+
+  echo "🧰 Installing Python tray dependencies..."
+  sudo apt install -y python3-pyqt6
+
+  echo "🔌 Installing yabridge..."
+  mkdir -p "$HOME_DIR/.local/share"
+  mkdir -p "$HOME_DIR/.local/bin"
+  cd /tmp
+  wget -q "$YABRIDGE_URL" -O yabridge.tar.gz
+  tar -xzf yabridge.tar.gz
+  rm -rf "$HOME_DIR/.local/share/yabridge"
+  mv yabridge "$HOME_DIR/.local/share/yabridge"
+  ln -sf "$HOME_DIR/.local/share/yabridge/yabridgectl" "$HOME_DIR/.local/bin/yabridgectl"
+
+  if ! echo "$PATH" | grep -q "$HOME_DIR/.local/bin"; then
+    echo 'export PATH="$HOME_DIR/.local/bin:$PATH"' >> "$HOME_DIR/.profile"
+  fi
+
+  export WINEPREFIX="$HOME_DIR/.wine-audio"
+  export WINEARCH=win64
+  wineboot -u
+
+  write_mode_switcher
+  write_tray_app
+  write_autostart
+
+  bash "$MODE_SWITCHER" gaming
+
+  echo
+  echo "✅ Install complete!"
+  echo "🔁 Please reboot once."
+  echo "🎮 Game mode is set as default."
+}
+
+########################################
+# Main
+########################################
+install_all
