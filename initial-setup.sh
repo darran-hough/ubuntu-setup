@@ -39,37 +39,10 @@ echo "Dry-run mode: $DRY_RUN"
 run_cmd sudo apt update
 run_cmd sudo apt upgrade -y
 
-run_cmd sudo apt install -y \
-  linux-image-rt \
-  linux-headers-rt \
-  pipewire \
-  pipewire-jack \
-  wireplumber \
-  alsa-utils \
-  rtkit \
-  gamemode \
-  cabextract \
-  unzip
-
-
-
-############################
-# WINE
-############################
-# Enable i386 architecture
-run_cmd sudo dpkg --add-architecture i386
-
-# Add WineHQ repository key and list
-run_cmd wget -O- https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor --output /usr/share/keyrings/winehq-archive.key
-run_cmd sudo tee /etc/apt/sources.list.d/winehq.list > /dev/null <<EOF
-deb [signed-by=/usr/share/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/ubuntu/ noble main
-EOF
-
-# Update and install Wine from WineHQ
-run_cmd sudo apt update
-run_cmd sudo apt install --install-recommends winehq-stable -y
-
-
+# Low-latency kernel for audio
+run_cmd sudo apt install -y linux-lowlatency linux-headers-lowlatency \
+    pipewire pipewire-jack wireplumber alsa-utils rtkit gamemode \
+    winetricks fonts-wine cabextract unzip wget gnupg2 software-properties-common
 
 ############################
 # PIPEWIRE ENABLE
@@ -240,25 +213,30 @@ EOF
 run_cmd chmod +x "$HOME_DIR/.local/bin/bitwig-rt.sh"
 
 ############################
-# WINE + YABRIDGE
+# WINEHQ INSTALLATION
 ############################
+# Add 32-bit support
 run_cmd sudo dpkg --add-architecture i386
-run_cmd sudo apt update
 
+# Add WineHQ key and repo
+run_cmd wget -O- https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor --output /usr/share/keyrings/winehq-archive.key
+run_cmd sudo tee /etc/apt/sources.list.d/winehq.list > /dev/null <<EOF
+deb [signed-by=/usr/share/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/ubuntu/ noble main
+EOF
+
+# Install Wine
+run_cmd sudo apt update
+run_cmd sudo apt install --install-recommends winehq-stable -y
+
+# Setup yabridge Wine prefix
 run_cmd mkdir -p "$WINEPREFIX"
 run_cmd export WINEPREFIX="$WINEPREFIX"
 run_cmd export WINEARCH=win64
 run_cmd wineboot --init
 run_cmd winetricks -q corefonts vcrun2015 vcrun2019 dxvk
-run_cmd mkdir -p "$WINEPREFIX/drive_c/VST2"
-run_cmd mkdir -p "$WINEPREFIX/drive_c/VST3"
-run_cmd mkdir -p "$HOME_DIR/.vst" "$HOME_DIR/.vst3"
-run_cmd yabridgectl set \
-  --wine-prefix="$WINEPREFIX" \
-  --path="$WINEPREFIX/drive_c/VST2" \
-  --path="$WINEPREFIX/drive_c/VST3"
+run_cmd mkdir -p "$WINEPREFIX/drive_c/VST2" "$WINEPREFIX/drive_c/VST3" "$HOME_DIR/.vst" "$HOME_DIR/.vst3"
+run_cmd yabridgectl set --wine-prefix="$WINEPREFIX" --path="$WINEPREFIX/drive_c/VST2" --path="$WINEPREFIX/drive_c/VST3"
 run_cmd yabridgectl sync
-
 
 ############################
 # BITWIG INSTALLER
@@ -273,8 +251,6 @@ else
     echo "[INFO] Launching Bitwig installer in Wine prefix..."
     run_cmd WINEPREFIX="$WINEPREFIX" wine "$BITWIG_INSTALLER"
 fi
-
-
 
 ############################
 # WAYLAND LATENCY FIX
