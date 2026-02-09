@@ -79,7 +79,7 @@ run_cmd systemctl --user enable pipewire pipewire-pulse wireplumber --now
 ############################
 # REALTIME PERMISSIONS
 ############################
-run_cmd tee /etc/security/limits.d/audio.conf > /dev/null <<EOF
+run_cmd sudo tee /etc/security/limits.d/audio.conf > /dev/null <<EOF
 @audio   -  rtprio     95
 @audio   -  memlock    unlimited
 @audio   -  nice      -19
