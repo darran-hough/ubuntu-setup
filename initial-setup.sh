@@ -1,222 +1,69 @@
 #!/usr/bin/env bash
-# ==========================================================
-# Ubuntu 24.04 Studio + Gaming Hybrid Setup
-# Bitwig | Steam | Focusrite | YaBridge | NVIDIA
-# v2.5 – FULL SCRIPT WITH PERSISTENT TRAY, MUTUALLY EXCLUSIVE MODES
-# ==========================================================
+set -e
 
-set -euo pipefail
+echo "=== Final Audio + Gaming Polish (Bitwig Edition) ==="
 
-echo "🚀 Starting Ubuntu Studio / Gaming setup..."
+USER_NAME=$(whoami)
+HOME_DIR=/home/$USER_NAME
 
-# ----------------------------------------------------------
-# Keep sudo alive
-# ----------------------------------------------------------
-sudo -v
-( while true; do sudo -n true; sleep 60; done ) &
-SUDO_PID=$!
-trap 'kill $SUDO_PID' EXIT
+### 1. Steam CPU affinity (keep off audio cores 2–3)
+mkdir -p $HOME_DIR/.config/systemd/user
 
-# ----------------------------------------------------------
-# System update
-# ----------------------------------------------------------
-sudo apt update
-sudo apt -y upgrade
-sudo apt -y autoremove
+tee $HOME_DIR/.config/systemd/user/steam-affinity.service > /dev/null <<EOF
+[Unit]
+Description=Steam CPU Affinity (protect audio cores)
 
-# ----------------------------------------------------------
-# Base packages
-# ----------------------------------------------------------
-sudo apt install -y \
-  build-essential git curl wget \
-  pipewire pipewire-jack pipewire-audio-client-libraries \
-  wireplumber \
-  jackd2 qjackctl \
-  alsa-utils pavucontrol \
-  wine winetricks \
-  steam gamemode \
-  yad gdebi-core \
-  gnome-tweaks
-
-# ----------------------------------------------------------
-# Ubuntu low-latency kernel
-# ----------------------------------------------------------
-if ! dpkg -l | grep -q linux-lowlatency; then
-  echo "🧠 Installing low-latency kernel..."
-  sudo apt install -y linux-lowlatency
-else
-  echo "✅ Low-latency kernel already installed"
-fi
-
-# ----------------------------------------------------------
-# Bitwig installation
-# ----------------------------------------------------------
-BITWIG_DEB="$HOME/Downloads/BitwigStudio.deb"
-if [[ -f "$BITWIG_DEB" ]]; then
-  sudo gdebi -n "$BITWIG_DEB"
-else
-  echo "⚠️ BitwigStudio.deb not found – skipping"
-fi
-
-# ----------------------------------------------------------
-# Real-time audio privileges
-# ----------------------------------------------------------
-sudo usermod -aG audio,video "$USER"
-sudo tee /etc/security/limits.d/99-audio.conf >/dev/null <<EOF
-@audio   -  rtprio     95
-@audio   -  memlock    unlimited
-@audio   -  nice      -19
+[Service]
+ExecStart=/usr/bin/taskset -c 0-1,4-15 %h/.steam/steam/ubuntu12_32/steam
+Restart=always
 EOF
 
-# ----------------------------------------------------------
-# Focusrite USB priority
-# ----------------------------------------------------------
-sudo tee /etc/udev/rules.d/90-focusrite.rules >/dev/null <<EOF
-SUBSYSTEM=="usb", ATTR{idVendor}=="1235", MODE="0666"
-EOF
-sudo udevadm control --reload
+systemctl --user daemon-reexec
+systemctl --user enable steam-affinity.service --now
 
-# ----------------------------------------------------------
-# PipeWire low-latency tuning
-# ----------------------------------------------------------
-mkdir -p ~/.config/pipewire/pipewire.conf.d
-cat > ~/.config/pipewire/pipewire.conf.d/99-lowlatency.conf <<EOF
-context.properties = {
-  default.clock.rate        = 48000
-  default.clock.quantum     = 128
-  default.clock.min-quantum = 64
-  default.clock.max-quantum = 256
-}
+### 2. Disable USB autosuspend for Focusrite
+sudo tee /etc/udev/rules.d/99-usb-focusrite-nosuspend.rules > /dev/null <<EOF
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="1235", TEST=="power/control", ATTR{power/control}="on"
 EOF
 
-# ----------------------------------------------------------
-# YaBridge installation
-# ----------------------------------------------------------
-if ! command -v yabridgectl >/dev/null; then
-  echo "🔧 Installing YaBridge..."
-  git clone https://github.com/robbert-vdh/yabridge.git /tmp/yabridge
-  mkdir -p ~/.local/bin ~/.local/share/yabridge
-  cp /tmp/yabridge/yabridge ~/.local/share/yabridge/
-  cp /tmp/yabridge/yabridgectl ~/.local/bin/
-  chmod +x ~/.local/bin/yabridgectl ~/.local/share/yabridge/yabridge
-  rm -rf /tmp/yabridge
-fi
-export PATH="$HOME/.local/bin:$PATH"
-yabridgectl set --path="$HOME/.wine/drive_c/Program Files/Common Files/VST2" || true
+sudo udevadm control --reload-rules
+sudo udevadm trigger
 
-# ----------------------------------------------------------
-# Modes folder
-# ----------------------------------------------------------
-mkdir -p ~/modes
+### 3. Bitwig realtime launcher (isolated cores)
+mkdir -p $HOME_DIR/.local/bin
 
-# =======================
-# STUDIO MODE SCRIPT
-# =======================
-cat > ~/modes/studio-mode.sh <<'EOF'
-#!/usr/bin/env bash
-# Activate Studio Mode
-echo "studio" > ~/.current_mode
-
-# CPU governor
-for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-  echo performance | sudo tee "$gov" >/dev/null || true
-done
-
-# Stop unnecessary services for studio
-sudo systemctl stop bluetooth cups 2>/dev/null || true
-echo -1 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null
-
-# Restart PipeWire
-systemctl --user restart pipewire pipewire-pulse wireplumber
+tee $HOME_DIR/.local/bin/bitwig-rt.sh > /dev/null <<EOF
+#!/bin/bash
+exec taskset -c 2,3 chrt -f 88 bitwig-studio
 EOF
-chmod +x ~/modes/studio-mode.sh
 
-# =======================
-# GAME MODE SCRIPT
-# =======================
-cat > ~/modes/game-mode.sh <<'EOF'
-#!/usr/bin/env bash
-# Activate Game Mode
-echo "game" > ~/.current_mode
+chmod +x $HOME_DIR/.local/bin/bitwig-rt.sh
 
-# CPU governor
-for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-  echo performance | sudo tee "$gov" >/dev/null || true
-done
+### 4. Desktop entry for Bitwig RT
+mkdir -p $HOME_DIR/.local/share/applications
 
-# Restore services
-sudo systemctl start bluetooth cups 2>/dev/null || true
-echo 2 | sudo tee /sys/module/usbcore/parameters/autosuspend >/dev/null
-
-# NVIDIA persistence mode
-if command -v nvidia-smi >/dev/null; then
-  sudo nvidia-smi -pm 1
-fi
-EOF
-chmod +x ~/modes/game-mode.sh
-
-# ----------------------------------------------------------
-# SYSTEM TRAY SWITCHER SCRIPT (v2.5)
-# ----------------------------------------------------------
-cat > ~/modes/mode-switcher.sh <<'EOF'
-#!/usr/bin/env bash
-
-MODE_FILE="$HOME/.current_mode"
-mkdir -p "$HOME"
-
-# Initialize mode file (default Game Mode)
-if [[ ! -f "$MODE_FILE" ]]; then
-    echo "game" > "$MODE_FILE"
-fi
-
-get_icon() {
-    mode=$(cat "$MODE_FILE")
-    if [[ "$mode" == "studio" ]]; then
-        echo "applications-multimedia"
-    else
-        echo "applications-games"
-    fi
-}
-
-run_mode() {
-    case "$1" in
-        studio)
-            "$HOME/modes/studio-mode.sh" ;;
-        game)
-            "$HOME/modes/game-mode.sh" ;;
-        vst)
-            yabridgectl sync
-            yad --notification --text="VST Sync Complete" ;;
-    esac
-}
-
-# Persistent tray icon
-while true; do
-    ICON=$(get_icon)
-    # The menu triggers on any click
-    yad --notification \
-        --image="$ICON" \
-        --text="Current Mode: $(cat $MODE_FILE)" \
-        --menu="🎹 Studio Mode!run_mode studio|🎮 Game Mode!run_mode game|🔄 VST Sync!run_mode vst" \
-        --listen | while read _; do
-            # No-op inside, handled by the menu
-            :
-        done
-done
-EOF
-chmod +x ~/modes/mode-switcher.sh
-
-# ----------------------------------------------------------
-# Autostart tray icon
-# ----------------------------------------------------------
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/mode-switcher.desktop <<EOF
+tee $HOME_DIR/.local/share/applications/bitwig-rt.desktop > /dev/null <<EOF
 [Desktop Entry]
+Name=Bitwig Studio (RT)
+Comment=Bitwig Studio with realtime priority
+Exec=$HOME_DIR/.local/bin/bitwig-rt.sh
+Icon=bitwig-studio
+Terminal=false
 Type=Application
-Exec=$HOME/modes/mode-switcher.sh
-Name=Mode Switcher
-X-GNOME-Autostart-enabled=true
+Categories=Audio;Music;
 EOF
 
-echo "✅ v2.5 setup complete."
-echo "🔁 REBOOT REQUIRED to boot low-latency kernel and apply permissions"
+### 5. Nice-to-have: ensure Bitwig triggers DAW buffer mode immediately
+# (forces 64 samples on launch)
+$HOME_DIR/.local/bin/pw-daw.sh || true
+
+echo "==============================================="
+echo "FINAL POLISH COMPLETE"
+echo ""
+echo "Use:"
+echo " • Bitwig Studio (RT) from app launcher"
+echo " • Steam automatically stays off audio cores"
+echo " • Focusrite never autosuspends"
+echo ""
+echo "Reboot recommended (USB + systemd changes)"
+echo "==============================================="
