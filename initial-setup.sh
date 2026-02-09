@@ -197,6 +197,22 @@ fi
 ############################
 # BITWIG INSTALLER CHECK + INSTALL (.deb)
 ############################
+# Enable 32-bit architecture
+run_cmd sudo dpkg --add-architecture i386
+run_cmd sudo apt update
+
+# Install only available dependencies
+BITWIG_DEPS="libxcb-icccm4:i386 libxcb-util1:i386 libxcb-xinput0:i386 libxkbcommon-x11-0:i386 libxcb-ewmh2"
+
+echo "[INFO] Installing available dependencies for Bitwig..."
+for pkg in $BITWIG_DEPS; do
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+        run_cmd sudo apt install -y "$pkg"
+    else
+        echo "[WARN] Package $pkg not found in repositories, skipping..."
+    fi
+done
+
 BITWIG_INSTALLER=$(ls -t $HOME_DIR/Downloads/Bitwig_Studio_*.deb 2>/dev/null | head -n 1 || true)
 
 if [ -z "$BITWIG_INSTALLER" ]; then
@@ -205,11 +221,13 @@ if [ -z "$BITWIG_INSTALLER" ]; then
 else
     echo "[INFO] Found Bitwig installer: $BITWIG_INSTALLER"
     if [ "$DRY_RUN" = true ]; then
-        echo "[DRY-RUN] Would run: sudo dpkg -i \"$BITWIG_INSTALLER\" && sudo apt -f install -y"
+        echo "[DRY-RUN] Would run: sudo dpkg -i \"$BITWIG_INSTALLER\" && sudo apt --fix-broken install -y"
     else
         echo "[INFO] Installing Bitwig..."
-        sudo dpkg -i "$BITWIG_INSTALLER"
-        sudo apt -f install -y
+        sudo dpkg -i "$BITWIG_INSTALLER" || true
+        echo "[INFO] Fixing broken packages..."
+        sudo apt --fix-broken install -y
+        echo "[INFO] Bitwig installation complete."
     fi
 fi
 
@@ -248,7 +266,6 @@ menu.addAction("Enable Studio Mode").triggered.connect(lambda: [run_cmd(f"{HOME}
 menu.addAction("VST Sync").triggered.connect(lambda: run_cmd("yabridgectl sync"))
 menu.addSeparator()
 menu.addAction("Enable Game Mode").triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-game.sh"), tray.setIcon(game_icon)])
-
 
 tray.setContextMenu(menu)
 sys.exit(app.exec())
