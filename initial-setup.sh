@@ -67,9 +67,9 @@ run_cmd mkdir -p "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
 run_cmd tee "$HOME_DIR/.config/wireplumber/wireplumber.conf.d/99-low-latency.conf" > /dev/null <<EOF
 context.properties = {
     default.clock.rate        = 48000
-    default.clock.quantum     = 128
-    default.clock.min-quantum = 64
-    default.clock.max-quantum = 1024
+    default.clock.quantum     = 64
+    default.clock.min-quantum = 32
+    default.clock.max-quantum = 256
 }
 EOF
 
@@ -143,21 +143,7 @@ EOF
 run_cmd chmod +x "$HOME_DIR/.local/bin"/pw-*.sh
 
 ############################
-# STEAM CPU AFFINITY
-############################
-# Placeholder if needed
-
-############################
-# BITWIG RT LAUNCHER
-############################
-run_cmd tee "$HOME_DIR/.local/bin/bitwig-rt.sh" > /dev/null <<EOF
-#!/bin/bash
-exec chrt -f 88 bitwig-studio
-EOF
-run_cmd chmod +x "$HOME_DIR/.local/bin/bitwig-rt.sh"
-
-############################
-# WINEHQ + YABRIDGE
+# WINEHQ + DXVK + YABRIDGE
 ############################
 run_cmd sudo dpkg --add-architecture i386
 run_cmd wget -O- https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor --yes --output /usr/share/keyrings/winehq-archive.key
@@ -177,7 +163,7 @@ run_cmd winetricks --force -q vcrun2019
 run_cmd winetricks -q dxvk
 
 ############################
-# INSTALL YABRIDGE (fixed)
+# YABRIDGE INSTALL
 ############################
 run_cmd mkdir -p "$YABRIDGE_DIR"
 
@@ -194,14 +180,12 @@ else
     echo "[WARN] You may need to install yabridge manually: https://github.com/robbert-vdh/yabridge/releases"
 fi
 
-# Add yabridge to PATH permanently
 PROFILE_FILE="$HOME_DIR/.profile"
 if ! grep -q 'export PATH="$HOME/.yabridge:$PATH"' "$PROFILE_FILE"; then
     run_cmd echo 'export PATH="$HOME/.yabridge:$PATH"' >> "$PROFILE_FILE"
 fi
 export PATH="$HOME_DIR/.yabridge:$PATH"
 
-# Only run yabridgectl if available
 if command -v yabridgectl >/dev/null 2>&1; then
     run_cmd mkdir -p "$WINEPREFIX/drive_c/VST2" "$WINEPREFIX/drive_c/VST3" "$HOME_DIR/.vst" "$HOME_DIR/.vst3"
     run_cmd yabridgectl set --wine-prefix="$WINEPREFIX" --path="$WINEPREFIX/drive_c/VST2" --path="$WINEPREFIX/drive_c/VST3"
@@ -209,6 +193,81 @@ if command -v yabridgectl >/dev/null 2>&1; then
 else
     echo "[WARN] yabridgectl not installed or not found in PATH."
 fi
+
+############################
+# BITWIG INSTALLER CHECK + INSTALL (.deb)
+############################
+BITWIG_INSTALLER=$(ls -t $HOME_DIR/Downloads/Bitwig_Studio_*.deb 2>/dev/null | head -n 1 || true)
+
+if [ -z "$BITWIG_INSTALLER" ]; then
+    echo "[WARN] No Bitwig .deb installer found in ~/Downloads"
+    echo "[INFO] Please download Bitwig Studio .deb installer and place it in ~/Downloads before running the script."
+else
+    echo "[INFO] Found Bitwig installer: $BITWIG_INSTALLER"
+    if [ "$DRY_RUN" = true ]; then
+        echo "[DRY-RUN] Would run: sudo dpkg -i \"$BITWIG_INSTALLER\" && sudo apt -f install -y"
+    else
+        echo "[INFO] Installing Bitwig..."
+        sudo dpkg -i "$BITWIG_INSTALLER"
+        sudo apt -f install -y
+    fi
+fi
+
+############################
+# SYSTEM TRAY PROFILE SWITCHER
+############################
+run_cmd mkdir -p "$HOME_DIR/bin"
+run_cmd tee "$HOME_DIR/bin/profile-switcher.py" > /dev/null <<'EOF'
+#!/usr/bin/env python3
+import sys, subprocess
+from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PyQt6.QtGui import QIcon
+
+HOME = "/home/" + subprocess.getoutput("whoami")
+def run_cmd(cmd): subprocess.Popen(cmd, shell=True)
+
+def check_yabridge():
+    try:
+        subprocess.check_output(["yabridgectl", "status"])
+        return "yabridge: OK"
+    except Exception:
+        return "yabridge: Not found"
+
+app = QApplication(sys.argv)
+tray = QSystemTrayIcon()
+tray.setVisible(True)
+tray.setToolTip(check_yabridge())
+
+studio_icon = QIcon.fromTheme("computer")
+game_icon = QIcon.fromTheme("applications-games")
+
+tray.setIcon(game_icon)
+
+menu = QMenu()
+menu.addAction("Enable Studio Mode").triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-daw.sh"), tray.setIcon(studio_icon)])
+menu.addAction("VST Sync").triggered.connect(lambda: run_cmd("yabridgectl sync"))
+menu.addSeparator()
+menu.addAction("Enable Game Mode").triggered.connect(lambda: [run_cmd(f"{HOME}/.local/bin/pw-game.sh"), tray.setIcon(game_icon)])
+menu.addSeparator()
+menu.addAction("Exit").triggered.connect(app.quit)
+
+tray.setContextMenu(menu)
+sys.exit(app.exec())
+EOF
+
+run_cmd chmod +x "$HOME_DIR/bin/profile-switcher.py"
+
+run_cmd mkdir -p "$HOME_DIR/.config/autostart"
+run_cmd tee "$HOME_DIR/.config/autostart/profile-switcher.desktop" > /dev/null <<EOF
+[Desktop Entry]
+Type=Application
+Exec=$HOME_DIR/bin/profile-switcher.py
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Audio/Game Profile Switcher
+Comment=Switch between Studio and Game profiles
+EOF
 
 ############################
 # FINAL SUMMARY
@@ -220,14 +279,14 @@ if [ "$DRY_RUN" = true ]; then
 else
     echo "SETUP COMPLETE!"
     echo "All audio and gaming optimizations have been applied."
-    echo "PipeWire, Wine, yabridge, NVIDIA, and Steam optimizations are ready."
+    echo "PipeWire, Wine, yabridge, NVIDIA, Focusrite, and Steam are ready."
+    echo "System tray profile switcher installed at: $HOME_DIR/bin/profile-switcher.py"
     if command -v yabridgectl >/dev/null 2>&1; then
-        YABRIDGE_VERSION=$(yabridgectl --version 2>/dev/null || echo "Unknown")
-        echo "Yabridge installed at: $HOME_DIR/.yabridge"
-        echo "Yabridge version: $YABRIDGE_VERSION"
+        YAB_VERSION=$(yabridgectl --version 2>/dev/null || echo "Unknown")
+        echo "Yabridge installed at: $YABRIDGE_DIR"
+        echo "Yabridge version: $YAB_VERSION"
     else
         echo "[WARN] yabridgectl not installed or not found in PATH."
-        echo "[WARN] You may need to install yabridge manually."
     fi
     echo
     echo "IMPORTANT: Please REBOOT your system for all changes to take effect."
