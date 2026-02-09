@@ -52,9 +52,9 @@ mkdir -p "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
 tee "$HOME_DIR/.config/wireplumber/wireplumber.conf.d/99-low-latency.conf" > /dev/null <<EOF
 context.properties = {
     default.clock.rate        = 48000
-    default.clock.quantum     = 64
-    default.clock.min-quantum = 32
-    default.clock.max-quantum = 256
+    default.clock.quantum     = 128
+    default.clock.min-quantum = 64
+    default.clock.max-quantum = 1024
 }
 EOF
 
