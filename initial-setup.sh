@@ -48,12 +48,28 @@ run_cmd sudo apt install -y \
   alsa-utils \
   rtkit \
   gamemode \
-  wine64 \
-  wine32 \
-  winetricks \
-  fonts-wine \
   cabextract \
   unzip
+
+
+
+############################
+# WINE
+############################
+# Enable i386 architecture
+run_cmd sudo dpkg --add-architecture i386
+
+# Add WineHQ repository key and list
+run_cmd wget -O- https://dl.winehq.org/wine-builds/winehq.key | sudo gpg --dearmor --output /usr/share/keyrings/winehq-archive.key
+run_cmd sudo tee /etc/apt/sources.list.d/winehq.list > /dev/null <<EOF
+deb [signed-by=/usr/share/keyrings/winehq-archive.key] https://dl.winehq.org/wine-builds/ubuntu/ noble main
+EOF
+
+# Update and install Wine from WineHQ
+run_cmd sudo apt update
+run_cmd sudo apt install --install-recommends winehq-stable -y
+
+
 
 ############################
 # PIPEWIRE ENABLE
